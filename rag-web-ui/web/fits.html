@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>DORM · Solar Spectrograms</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="./styles.css">
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+    <nav class="site-nav">
+      <a href="./index.html">Weather</a>
+      <a href="./fits.html" class="is-current" aria-current="page">Spectrograms</a>
+    </nav>
+
+
+    <header>
+
+      <div class="id-block">
+        <div class="eyebrow">Višnjan · CALLISTO</div>
+        <h1>DORM <span>/ Solar Spectrograms</span></h1>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="dot" id="status-dot"></span>
+          <span id="connection-status">INITIALIZING</span>
+        </div>
+        <div id="archive-summary">READING LOCAL ARCHIVE</div>
+        <div id="archive-span" class="status-sub">&nbsp;</div>
+      </div>
+
+    </header>
+
+
+    <div id="error-panel" class="error-panel"></div>
+
+
+    <!-- ===================== DAY SELECTOR ===================== -->
+
+    <section class="panel">
+
+      <div class="panel-head">
+        <span class="label">Observation Days</span>
+        <span class="tag" id="calendar-tag">—</span>
+      </div>
+
+      <div class="calendar-body">
+        <div class="calendar-strip" id="calendar-strip"></div>
+
+        <div class="calendar-legend">
+          <span><span class="legend-swatch is-on"></span> Recording</span>
+          <span><span class="legend-swatch is-off"></span> No data — station not recording</span>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- ===================== TIME SELECTOR ===================== -->
+
+    <section class="panel">
+
+      <div class="panel-head">
+        <span class="label">Sweeps · <span id="selected-day">—</span></span>
+        <span class="tag" id="sweep-count">—</span>
+      </div>
+
+      <div class="sweep-body">
+        <div class="sweep-strip" id="sweep-strip">
+          <span class="empty-note">Select a day above.</span>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- ===================== SPECTROGRAM ===================== -->
+
+    <section class="panel">
+
+      <div class="panel-head">
+        <span class="label">Spectrogram</span>
+        <span class="tag" id="spectrogram-tag">45–870 MHz</span>
+      </div>
+
+      <div class="spectrogram-controls">
+
+        <label class="control">
+          <span>Palette</span>
+          <select id="palette-select">
+            <option value="inferno">Inferno</option>
+            <option value="viridis">Viridis</option>
+            <option value="gray">Grayscale</option>
+          </select>
+        </label>
+
+        <label class="control">
+          <span>Background subtraction</span>
+          <select id="bgsub-select">
+            <option value="channel">Per channel (default)</option>
+            <option value="none">None (raw digits)</option>
+          </select>
+        </label>
+
+        <label class="control control-range">
+          <span>Contrast <em id="contrast-value">1.0</em></span>
+          <input type="range" id="contrast-range" min="0.4" max="4" step="0.1" value="1">
+        </label>
+
+      </div>
+
+      <div class="spectrogram-body">
+        <canvas id="spectrogram"></canvas>
+        <div id="spectrogram-note" class="spectrogram-note">
+          No sweep loaded.
+        </div>
+      </div>
+
+      <div class="spectrogram-meta" id="spectrogram-meta"></div>
+
+    </section>
+
+
+    <footer class="page-footer">
+      DORM GROUND SUPPORT · VIŠNJAN · CALLISTO FITS · TIMES IN UTC
+    </footer>
+
+  </div>
+
+
+  <script>
+
+    /*
+     * ============================================================
+     * DORM SPECTROGRAM VIEWER
+     * ============================================================
+     *
+     * Reads /api/fits/index.json (written by server.py) to learn
+     * which days and sweeps exist locally, then decodes the
+     * selected .fit.gz entirely in the browser:
+     *
+     *   gzip -> FITS header parse -> 8-bit image -> canvas
+     *
+     * CALLISTO files are 2D images: axis 1 is time (0.25 s per
+     * column), axis 2 is frequency channel. Values are "digits"
+     * (uncalibrated receiver output), so what matters visually is
+     * the variation over the background, not absolute level --
+     * hence the per-channel background subtraction below, which is
+     * what makes bursts visible at all.
+     * ============================================================
+     */
+
+    const INDEX_URL = "./api/fits/index.json";
+
+    let indexData = null;
+    let selectedDate = null;
+    let currentImage = null;   // { width, height, data, header }
+    let contrast = 1.0;
+
+
+    function element(id) {
+      return document.getElementById(id);
+    }
+
+    function setText(id, value) {
+      const node = element(id);
+      if (node) node.textContent = value;
+    }
+
+    function showError(message) {
+      const panel = element("error-panel");
+      panel.textContent = message;
+      panel.style.display = "block";
+      setText("connection-status", "ARCHIVE: ERROR");
+      element("status-dot").style.background = "#E85D5D";
+    }
+
+
+    // ============================================================
+    // INDEX
+    // ============================================================
+
+    async function loadIndex() {
+      let response;
+      try {
+        response = await fetch(INDEX_URL + "?_=" + Date.now(), { cache: "no-store" });
+      }
+      catch (e) {
+        throw new Error(
+          "Could not read the FITS index.\n\n" + e.message +
+          "\n\nStart the station server:  python server.py"
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          "FITS index not found (HTTP " + response.status + ").\n\n" +
+          "Run  python server.py  to build it, and\n" +
+          "python rag-web-ui/fetch_visnjan_fits.py  to download spectrograms."
+        );
+      }
+
+      return response.json();
+    }
+
+
+    function renderCalendar() {
+      const strip = element("calendar-strip");
+      strip.innerHTML = "";
+
+      const calendar = indexData.calendar || [];
+
+      if (!calendar.length) {
+        strip.innerHTML =
+          '<span class="empty-note">No spectrograms stored locally yet. ' +
+          'Run <code>python rag-web-ui/fetch_visnjan_fits.py</code>.</span>';
+        return;
+      }
+
+      calendar.forEach(day => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "day-btn" + (day.available ? " is-on" : " is-off");
+        button.disabled = !day.available;
+
+        button.innerHTML =
+          '<span class="day-date">' + day.date.slice(5) + "</span>" +
+          '<span class="day-meta">' +
+          (day.available ? day.count + " sweeps" : "no data") +
+          "</span>";
+
+        button.title = day.available
+          ? day.date + " — " + day.count + " sweeps recorded"
+          : day.date + " — data not available (station not recording)";
+
+        if (day.available) {
+          button.addEventListener("click", () => selectDay(day.date));
+        }
+
+        strip.appendChild(button);
+      });
+
+      const totals = indexData.totals || {};
+      setText(
+        "calendar-tag",
+        (totals.days_with_data || 0) + " OF " + (totals.days_in_span || 0) + " DAYS RECORDED"
+      );
+    }
+
+
+    function selectDay(dateKey) {
+      selectedDate = dateKey;
+
+      document.querySelectorAll(".day-btn").forEach(button => {
+        button.classList.toggle(
+          "is-active",
+          button.querySelector(".day-date").textContent === dateKey.slice(5)
+        );
+      });
+
+      const files = (indexData.days || {})[dateKey] || [];
+      setText("selected-day", dateKey);
+      setText("sweep-count", files.length + " SWEEPS");
+
+      const strip = element("sweep-strip");
+      strip.innerHTML = "";
+
+      if (!files.length) {
+        strip.innerHTML = '<span class="empty-note">No sweeps for this day.</span>';
+        return;
+      }
+
+      files.forEach((file, i) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "sweep-btn";
+        button.textContent = file.time.slice(0, 5);
+        button.title = file.name + " (" + Math.round(file.size / 1024) + " KB)";
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".sweep-btn").forEach(b => b.classList.remove("is-active"));
+          button.classList.add("is-active");
+          loadSpectrogram(file);
+        });
+        strip.appendChild(button);
+
+        if (i === 0) {
+          button.classList.add("is-active");
+          loadSpectrogram(file);
+        }
+      });
+    }
+
+
+    // ============================================================
+    // FITS DECODING
+    // ============================================================
+
+    async function gunzip(buffer) {
+      if (typeof DecompressionStream === "undefined") {
+        throw new Error(
+          "This browser can't decompress .gz files (DecompressionStream missing).\n" +
+          "Use a current Firefox, Chrome or Edge."
+        );
+      }
+
+      const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream("gzip"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+
+    /* FITS headers are 80-character card images padded to 2880-byte
+     * blocks, ending with an END card. */
+    function parseHeader(bytes) {
+      const header = {};
+      let offset = 0;
+
+      while (offset < bytes.length) {
+        const block = new TextDecoder("ascii").decode(bytes.subarray(offset, offset + 2880));
+
+        for (let i = 0; i < 2880; i += 80) {
+          const card = block.slice(i, i + 80);
+          const key = card.slice(0, 8).trim();
+
+          if (key === "END") {
+            return { header, dataOffset: offset + 2880 };
+          }
+          if (!key || card[8] !== "=") {
+            continue;
+          }
+
+          const field = card.slice(10);
+          let value;
+
+          if (field.trim().startsWith("'")) {
+            /* Quoted string: the comment separator only counts AFTER the
+             * closing quote -- dates like '2025/09/09' contain slashes
+             * and must not be cut at the first one. */
+            const start = field.indexOf("'");
+            const end = field.indexOf("'", start + 1);
+            value = (end === -1 ? field.slice(start + 1) : field.slice(start + 1, end)).trim();
+          }
+          else {
+            value = field.split("/")[0].trim();
+            if (value === "T" || value === "F") {
+              value = value === "T";
+            }
+            else if (value !== "" && !Number.isNaN(Number(value))) {
+              value = Number(value);
+            }
+          }
+
+          header[key] = value;
+        }
+
+        offset += 2880;
+      }
+
+      throw new Error("Malformed FITS: no END card found.");
+    }
+
+
+    /* CALLISTO's real frequency list lives in a BINTABLE extension after
+     * the image, not in CRVAL2/CDELT2 -- the header even warns the axis
+     * "may not be regular". Trusting the linear header values reports
+     * something like 1-200 MHz for a receiver that actually covers
+     * 45-404 MHz, so read the table when it's there. */
+    function readFrequencyAxis(raw, dataOffset, width, height) {
+      try {
+        const imageBytes = width * height;
+        let offset = dataOffset + imageBytes;
+        offset += (2880 - (imageBytes % 2880)) % 2880;
+
+        if (offset + 2880 > raw.length) {
+          return null;
+        }
+
+        const { header: ext, dataOffset: tableStart } = parseHeader(raw.subarray(offset));
+        if (ext.XTENSION !== "BINTABLE" || ext.TTYPE2 !== "FREQUENCY") {
+          return null;
+        }
+
+        const rowStart = offset + tableStart;
+        const view = new DataView(raw.buffer, raw.byteOffset + rowStart + width * 8, height * 8);
+
+        const frequencies = new Float64Array(height);
+        for (let i = 0; i < height; i++) {
+          frequencies[i] = view.getFloat64(i * 8, false); // FITS is big-endian
+        }
+        return frequencies;
+      }
+      catch (e) {
+        console.warn("[DORM] frequency axis unreadable, falling back to header", e);
+        return null;
+      }
+    }
+
+
+    async function loadSpectrogram(file) {
+      const note = element("spectrogram-note");
+      note.style.display = "flex";
+      note.textContent = "Loading " + file.name + " …";
+
+      try {
+        const response = await fetch(file.url, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status + " fetching " + file.url);
+        }
+
+        const raw = await gunzip(await response.arrayBuffer());
+        const { header, dataOffset } = parseHeader(raw);
+
+        const width = header.NAXIS1;
+        const height = header.NAXIS2;
+        const bitpix = header.BITPIX;
+
+        if (bitpix !== 8) {
+          throw new Error(
+            "Unsupported BITPIX " + bitpix + " — this viewer handles the " +
+            "8-bit images CALLISTO produces."
+          );
+        }
+        if (!width || !height) {
+          throw new Error("FITS is missing NAXIS1/NAXIS2.");
+        }
+
+        currentImage = {
+          width, height, header,
+          data: raw.subarray(dataOffset, dataOffset + width * height),
+          frequencies: readFrequencyAxis(raw, dataOffset, width, height)
+        };
+
+        drawSpectrogram();
+        renderMeta(file, header);
+        note.style.display = "none";
+      }
+      catch (e) {
+        console.error("[DORM] spectrogram load failed", e);
+        note.style.display = "flex";
+        note.textContent = e.message;
+      }
+    }
+
+
+    // ============================================================
+    // RENDERING
+    // ============================================================
+
+    const PALETTES = {
+      /* Perceptually-ordered ramps: brightness rises monotonically, so
+       * a brighter pixel always means a stronger signal. */
+      inferno: [
+        [0, 0, 4], [22, 11, 57], [66, 10, 104], [106, 23, 110],
+        [147, 38, 103], [188, 55, 84], [221, 81, 58], [243, 120, 25],
+        [252, 165, 10], [246, 215, 70], [252, 255, 164]
+      ],
+      viridis: [
+        [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142],
+        [38, 130, 142], [31, 158, 137], [53, 183, 121], [109, 205, 89],
+        [180, 222, 44], [253, 231, 37]
+      ],
+      gray: [[0, 0, 0], [255, 255, 255]]
+    };
+
+
+    function sampleRamp(ramp, t) {
+      const clamped = Math.max(0, Math.min(1, t));
+      const scaled = clamped * (ramp.length - 1);
+      const i = Math.min(ramp.length - 2, Math.floor(scaled));
+      const f = scaled - i;
+
+      return [
+        Math.round(ramp[i][0] + f * (ramp[i + 1][0] - ramp[i][0])),
+        Math.round(ramp[i][1] + f * (ramp[i + 1][1] - ramp[i][1])),
+        Math.round(ramp[i][2] + f * (ramp[i + 1][2] - ramp[i][2]))
+      ];
+    }
+
+
+    function drawSpectrogram() {
+      if (!currentImage) return;
+
+      const { width, height, data } = currentImage;
+      const canvas = element("spectrogram");
+      const ctx = canvas.getContext("2d");
+
+      canvas.width = width;
+      canvas.height = height;
+
+      const ramp = PALETTES[element("palette-select").value] || PALETTES.inferno;
+      const subtract = element("bgsub-select").value === "channel";
+
+      /* Per-channel background: the median of each frequency row. A
+       * CALLISTO receiver's baseline differs wildly per channel (RFI,
+       * gain), so without this the image is horizontal stripes and any
+       * real burst is invisible. */
+      const baseline = new Float32Array(height);
+      if (subtract) {
+        const scratch = new Uint8Array(width);
+        for (let y = 0; y < height; y++) {
+          scratch.set(data.subarray(y * width, y * width + width));
+          const sorted = Array.from(scratch).sort((a, b) => a - b);
+          baseline[y] = sorted[Math.floor(sorted.length / 2)];
+        }
+      }
+
+      /* Scale to percentiles, not min/max. A handful of RFI spikes would
+       * otherwise stretch the range so far that the actual solar signal
+       * collapses into one flat colour. Values are small integers, so a
+       * histogram gives exact percentiles cheaply. */
+      const OFFSET = 255;
+      const histogram = new Int32Array(511);
+
+      for (let y = 0; y < height; y++) {
+        const base = subtract ? baseline[y] : 0;
+        for (let x = 0; x < width; x++) {
+          const v = Math.round(data[y * width + x] - base) + OFFSET;
+          if (v >= 0 && v < histogram.length) {
+            histogram[v]++;
+          }
+        }
+      }
+
+      const total = width * height;
+      const percentile = fraction => {
+        let seen = 0;
+        const target = total * fraction;
+        for (let i = 0; i < histogram.length; i++) {
+          seen += histogram[i];
+          if (seen >= target) return i - OFFSET;
+        }
+        return histogram.length - 1 - OFFSET;
+      };
+
+      let lo = percentile(0.01);
+      let hi = percentile(0.995);
+      if (hi <= lo) {
+        hi = lo + 1;
+      }
+
+      const image = ctx.createImageData(width, height);
+      const span = hi - lo;
+      /* Gamma, so the slider lifts faint structure without clipping the
+       * bright end -- a linear multiplier just saturates the burst. */
+      const gamma = 1 / contrast;
+
+      for (let y = 0; y < height; y++) {
+        /* FITS row 0 is the bottom of the image; the canvas draws top
+         * down. CALLISTO's CDELT2 is negative (frequency decreases with
+         * row), so flipping here puts high frequency at the top, which
+         * is how e-Callisto quicklooks are conventionally shown. */
+        const sourceRow = height - 1 - y;
+
+        const base = subtract ? baseline[sourceRow] : 0;
+
+        for (let x = 0; x < width; x++) {
+          const value = data[sourceRow * width + x] - base;
+          const normalized = Math.max(0, Math.min(1, (value - lo) / span));
+          const [r, g, b] = sampleRamp(ramp, Math.pow(normalized, gamma));
+          const p = (y * width + x) * 4;
+          image.data[p] = r;
+          image.data[p + 1] = g;
+          image.data[p + 2] = b;
+          image.data[p + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(image, 0, 0);
+    }
+
+
+    function renderMeta(file, header) {
+      const startSec = header.CRVAL1;
+      const step = header.CDELT1 || 0.25;
+      const durationSec = (header.NAXIS1 || 0) * step;
+
+      const frequencies = currentImage && currentImage.frequencies;
+      let freqLow;
+      let freqHigh;
+      let freqSource;
+
+      if (frequencies && frequencies.length) {
+        freqLow = Math.min(...frequencies);
+        freqHigh = Math.max(...frequencies);
+        freqSource = "measured (FITS frequency table)";
+      }
+      else {
+        freqHigh = header.CRVAL2;
+        freqLow = header.CRVAL2 + (header.CDELT2 || -1) * ((header.NAXIS2 || 1) - 1);
+        freqSource = "approximated from header";
+      }
+
+      const rows = [
+        ["File", file.name],
+        ["Observed", (header["DATE-OBS"] || "—") + " " + (header["TIME-OBS"] || "")],
+        ["Ends", (header["DATE-END"] || "—") + " " + (header["TIME-END"] || "")],
+        ["Duration", durationSec ? (durationSec / 60).toFixed(1) + " min" : "—"],
+        ["Time resolution", step + " s per column"],
+        ["Frequency", Math.min(freqLow, freqHigh).toFixed(1) + " – " +
+                      Math.max(freqLow, freqHigh).toFixed(1) + " MHz"],
+        ["Frequency axis", freqSource],
+        ["Channels", header.NAXIS2],
+        ["Samples", header.NAXIS1],
+        ["Instrument", header.INSTRUME || "—"],
+        ["Unit", header.BUNIT || "digits"]
+      ];
+
+      element("spectrogram-meta").innerHTML = rows.map(([label, value]) =>
+        '<div class="meta-cell"><div class="m-label">' + label +
+        '</div><div class="m-value">' + value + "</div></div>"
+      ).join("");
+
+      setText(
+        "spectrogram-tag",
+        Math.min(freqLow, freqHigh).toFixed(0) + "–" + Math.max(freqLow, freqHigh).toFixed(0) + " MHz"
+      );
+    }
+
+
+    // ============================================================
+    // CONTROLS
+    // ============================================================
+
+    element("palette-select").addEventListener("change", drawSpectrogram);
+    element("bgsub-select").addEventListener("change", drawSpectrogram);
+
+    element("contrast-range").addEventListener("input", event => {
+      contrast = Number(event.target.value);
+      setText("contrast-value", contrast.toFixed(1));
+      drawSpectrogram();
+    });
+
+
+    // ============================================================
+    // START
+    // ============================================================
+
+    (async function start() {
+      try {
+        indexData = await loadIndex();
+
+        const totals = indexData.totals || {};
+        setText("connection-status", "ARCHIVE: LOCAL");
+        setText(
+          "archive-summary",
+          totals.files + " FILES · " + totals.days_with_data + " DAYS"
+        );
+
+        const dates = indexData.available_dates || [];
+        setText(
+          "archive-span",
+          dates.length ? dates[0] + " → " + dates[dates.length - 1] : "NO DATA STORED"
+        );
+
+        renderCalendar();
+
+        if (dates.length) {
+          selectDay(dates[dates.length - 1]);
+        }
+      }
+      catch (e) {
+        console.error("[DORM] index load failed", e);
+        showError(e.message);
+      }
+    })();
+
+  </script>
+
+</body>
+
+</html>

@@ -5,6 +5,50 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [3.0.0] - 2026-08-13
+
+### Added
+- `server.py` — a single self-contained station server replacing the old
+  three-process setup. Runs the TLS ingest, the JSON generator and the web
+  server in one command, storing everything under `data/` so the site works
+  with the Pi offline.
+- Spectrogram viewer (`rag-web-ui/web/fits.html`): decodes real CALLISTO
+  `.fit.gz` files entirely in the browser (gunzip → FITS parse → canvas),
+  with day/sweep browsing, three perceptually-ordered palettes, per-channel
+  median background subtraction and percentile contrast scaling. Days with
+  no observations are shown explicitly as "not recording" rather than
+  hidden.
+- `fetch_visnjan_fits.py` — downloads real spectrograms from the
+  e-Callisto archive, searching backwards for days that actually have data.
+- `fetch_demo_weather.py` — pulls real observed weather for Višnjan from
+  Open-Meteo, replacing the previous synthetic series. `--simulate-outage`
+  deliberately drops days to exercise gap rendering.
+- Dew point (Magnus formula), humidity and pressure charts.
+- Range selector (24H / 7D / 30D / all) filtering client-side, with stat
+  labels that relabel themselves so figures can't be misread as another
+  period.
+- Data-gap detection: a gap over 3× the series' own cadence inserts a null
+  marker so charts break instead of interpolating across downtime.
+- Both UTC and local time everywhere, plus a live "updated Ns ago".
+- Site navigation between the weather and spectrogram pages.
+
+### Changed
+- **Renamed to DORM** throughout (was ARRAY-7).
+- `generate_dashboard_api.py` now emits full history by default
+  (`--history-hours 0`); range filtering moved to the browser.
+- Local store moved to `data/weather/` and `data/fits/`.
+- `.gitignore` now excludes all collected data — the repo carries the code
+  that pulls and displays data, never the data itself.
+
+### Fixed
+- FITS header parser split values at `/` to strip comments, truncating
+  quoted dates like `'2025/09/09'` to `2025`.
+- Frequency axis was read from `CRVAL2`/`CDELT2`, reporting ~1–200 MHz for
+  an instrument that actually covers 45–404 MHz. Now read from the file's
+  BINTABLE frequency column, with the source labelled in the UI.
+- Spectrogram contrast scaled from min/max, so one RFI spike flattened the
+  whole image to a single colour. Now percentile-based with a gamma slider.
+
 ## [2.1.1] - 2026-08-13
 
 ### Fixed

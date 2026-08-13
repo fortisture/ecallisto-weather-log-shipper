@@ -97,14 +97,35 @@ python3 sender.py config.json
    `.csv` (path traversal is rejected) before being applied under
    `incoming_logs/`.
 
+## The station server
+
+The receiving PC runs one self-contained process that does everything:
+accepts data from the Pi, stores it locally, and serves the web UI from
+that local copy — so the site keeps working when the Pi is offline.
+
+```bash
+python server.py
+```
+
+Then open <http://127.0.0.1:8090/>. Add `--no-receiver` to serve the site
+without accepting Pi uploads.
+
 ## Repository layout
 
 ```
-pi/sender.py                  sender, runs on the Pi
+server.py                      the station server: ingest + store + serve
+pi/sender.py                   sender, runs on the Pi
 pi/setup_pi.sh                 installs sender.py as a systemd service
 pi/config.example.json         config template (fill in and copy to the Pi)
-windows/receiver.py            receiver, runs on the Windows PC
-windows/install_and_run.ps1    generates secrets + registers the receiver
-rag-web-ui/                    browser dashboard reading incoming_logs/ (see rag-web-ui/README.md)
+windows/receiver.py            TLS ingest, used by server.py
+windows/install_and_run.ps1    generates secrets + firewall + scheduled task
+rag-web-ui/                    the web UI and its data tooling
+data/                          local store (gitignored -- see below)
+M&M EXPLANATION FOR DUMMIES.md full plain-English explanation of everything
 CHANGELOG.md
 ```
+
+**The repository holds code, never data.** Everything the station collects
+or downloads lives in `data/` and is gitignored, along with all secrets
+(`*.pem`, `token.txt`, `fingerprint.txt`, `config.json`) and the generated
+dashboard JSON. Clone the repo anywhere and it rebuilds its own data.

@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""DORM station server -- one process that runs the whole ground station.
+
+Replaces the old three-terminal setup (receiver + JSON generator + a
+throwaway http.server). Running this one command gives you:
+
+  * the TLS receiver, accepting rows shipped from the Pi by pi/sender.py
+    and appending them to the local store (data/weather/)
+  * a watcher that regenerates the dashboard's JSON API whenever that
+    store changes
+  * an index of locally stored CALLISTO FITS spectrograms
+  * the web UI itself, served over HTTP
+
+So the box running this is self-contained: it pulls from the Pi, keeps
+its own copy of everything, and serves the site from that local copy. It
+does not depend on the Pi being reachable to display history.
+
+Dependency-free: standard library only.
+
+    python server.py                      # everything, default ports
+    python server.py --no-receiver        # serve only (no Pi ingest)
+    python server.py --http-port 8080
+"""
+import argparse
+import importlib.util
+import json
+import os
+import re
+import sys
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+WEB_DIR = os.path.join(HERE, "rag-web-ui", "web")
+DEFAULT_WEATHER_DIR = os.path.join(HERE, "data", "weather")
+DEFAULT_FITS_DIR = os.path.join(HERE, "data", "fits")
+
+FITS_NAME = re.compile(r"^[A-Za-z0-9-]+_(\d{8})_(\d{6})_\d{2}\.fit\.gz$")
+
+
+def log(msg):
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
+
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# --------------------------------------------------------------------
+# FITS index
+# --------------------------------------------------------------------
+
+def build_fits_index(fits_dir, api_dir):
+    """Index locally stored spectrograms, marking every day in the span
+    as recording or not -- the gaps are as informative as the data."""
+    days = {}
+
+    if os.path.isdir(fits_dir):
+        for entry in sorted(os.listdir(fits_dir)):
+            day_path = os.path.join(fits_dir, entry)
+            if not os.path.isdir(day_path):
+                continue
+            try:
+                datetime.strptime(entry, "%Y-%m-%d")
+            except ValueError:
+                continue
+
+            files = []
+            for name in sorted(os.listdir(day_path)):
+                match = FITS_NAME.match(name)
+                if not match:
+                    continue
+                hhmmss = match.group(2)
+                files.append({
+                    "name": name,
+                    "time": f"{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}",
+                    "url": f"/fits/{entry}/{name}",
+                    "size": os.path.getsize(os.path.join(day_path, name)),
+                })
+
+            if files:
+                days[entry] = files
+
+    available = sorted(days)
+    calendar = []
+
+    if available:
+        first = datetime.strptime(available[0], "%Y-%m-%d").date()
+        last = datetime.strptime(available[-1], "%Y-%m-%d").date()
+        cursor = first
+        while cursor <= last:
+            key = cursor.isoformat()
+            calendar.append({
+                "date": key,
+                "available": key in days,
+                "count": len(days.get(key, [])),
+            })
+            cursor += timedelta(days=1)
+
+    index = {
+        "station": "Croatia-Visnjan",
+        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "available_dates": available,
+        "calendar": calendar,
+        "days": days,
+        "totals": {
+            "days_with_data": len(available),
+            "files": sum(len(v) for v in days.values()),
+            "days_in_span": len(calendar),
+        },
+    }
+
+    out = os.path.join(api_dir, "fits", "index.json")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = out + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(index, f, indent=2)
+    os.replace(tmp, out)
+
+    return index
+
+
+# --------------------------------------------------------------------
+# HTTP
+# --------------------------------------------------------------------
+
+class StationHandler(SimpleHTTPRequestHandler):
+    """Serves the web UI, and maps /fits/... onto the local FITS store."""
+
+    def __init__(self, *args, fits_dir=None, **kwargs):
+        self.fits_dir = fits_dir
+        super().__init__(*args, directory=WEB_DIR, **kwargs)
+
+    def translate_path(self, path):
+        clean = path.split("?", 1)[0].split("#", 1)[0]
+        if clean.startswith("/fits/"):
+            relative = clean[len("/fits/"):]
+            # Reject anything that could climb out of the store.
+            safe = os.path.normpath(relative).replace("\\", "/")
+            if safe.startswith("..") or os.path.isabs(safe):
+                return os.path.join(self.fits_dir, "__denied__")
+            return os.path.join(self.fits_dir, *safe.split("/"))
+        return super().translate_path(path)
+
+    def end_headers(self):
+        # The dashboard polls these; stale copies would mask fresh data.
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        super().end_headers()
+
+    def log_message(self, fmt, *args):
+        pass  # too chatty; the watcher already reports what matters
+
+
+def serve_http(host, port, fits_dir):
+    handler = partial(StationHandler, fits_dir=fits_dir)
+    httpd = ThreadingHTTPServer((host, port), handler)
+    log(f"web UI on http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}/")
+    httpd.serve_forever()
+
+
+# --------------------------------------------------------------------
+# Watcher
+# --------------------------------------------------------------------
+
+def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval):
+    last_weather = None
+    last_fits = None
+
+    while True:
+        try:
+            digest = generator.hash_dir(weather_dir)
+            if digest != last_weather:
+                total, emitted = generator.generate(weather_dir, os.path.join(api_dir, "weather"), 0)
+                log(f"weather API rebuilt: {total} readings")
+                last_weather = digest
+
+            fits_state = fits_fingerprint(fits_dir)
+            if fits_state != last_fits:
+                index = build_fits_index(fits_dir, api_dir)
+                log(
+                    f"FITS index rebuilt: {index['totals']['files']} files across "
+                    f"{index['totals']['days_with_data']} day(s)"
+                )
+                last_fits = fits_state
+        except Exception as e:  # a watcher crash must not take the server down
+            log(f"watcher error: {e}")
+
+        time.sleep(interval)
+
+
+def fits_fingerprint(fits_dir):
+    if not os.path.isdir(fits_dir):
+        return ()
+    out = []
+    for entry in sorted(os.listdir(fits_dir)):
+        day_path = os.path.join(fits_dir, entry)
+        if os.path.isdir(day_path):
+            out.append((entry, len(os.listdir(day_path))))
+    return tuple(out)
+
+
+# --------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--http-host", default="0.0.0.0")
+    ap.add_argument("--http-port", type=int, default=8090)
+    ap.add_argument("--weather-dir", default=DEFAULT_WEATHER_DIR)
+    ap.add_argument("--fits-dir", default=DEFAULT_FITS_DIR)
+    ap.add_argument("--api-dir", default=os.path.join(WEB_DIR, "api"))
+    ap.add_argument("--poll-interval", type=float, default=2.0)
+
+    ap.add_argument("--no-receiver", action="store_true", help="serve only; don't accept Pi uploads")
+    ap.add_argument("--receiver-host", default="0.0.0.0")
+    ap.add_argument("--receiver-port", type=int, default=9443)
+    ap.add_argument("--cert", default=os.path.join(HERE, "windows", "cert.pem"))
+    ap.add_argument("--key", default=os.path.join(HERE, "windows", "key.pem"))
+    ap.add_argument("--token-file", default=os.path.join(HERE, "windows", "token.txt"))
+    args = ap.parse_args()
+
+    weather_dir = os.path.abspath(args.weather_dir)
+    fits_dir = os.path.abspath(args.fits_dir)
+    api_dir = os.path.abspath(args.api_dir)
+
+    os.makedirs(weather_dir, exist_ok=True)
+    os.makedirs(fits_dir, exist_ok=True)
+
+    generator = load_module(
+        "dashboard_api",
+        os.path.join(HERE, "rag-web-ui", "generate_dashboard_api.py"),
+    )
+
+    log(f"weather store: {weather_dir}")
+    log(f"FITS store:    {fits_dir}")
+
+    if not args.no_receiver:
+        missing = [p for p in (args.cert, args.key, args.token_file) if not os.path.exists(p)]
+        if missing:
+            log("receiver disabled -- missing " + ", ".join(os.path.basename(m) for m in missing))
+            log("run windows/install_and_run.ps1 to generate them, or pass --no-receiver")
+        else:
+            receiver = load_module("receiver", os.path.join(HERE, "windows", "receiver.py"))
+            thread = threading.Thread(
+                target=run_receiver,
+                args=(receiver, args, weather_dir),
+                daemon=True,
+            )
+            thread.start()
+
+    watcher = threading.Thread(
+        target=watch_and_generate,
+        args=(generator, weather_dir, api_dir, fits_dir, args.poll_interval),
+        daemon=True,
+    )
+    watcher.start()
+
+    try:
+        serve_http(args.http_host, args.http_port, fits_dir)
+    except KeyboardInterrupt:
+        log("shutting down")
+
+
+def run_receiver(receiver, args, weather_dir):
+    """Drive windows/receiver.py's connection handler on our own socket."""
+    import socket
+    import ssl
+
+    with open(args.token_file) as f:
+        token = f.read().strip()
+
+    cfg = {"token": token, "outdir": weather_dir}
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)
+
+    lock = threading.Lock()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((args.receiver_host, args.receiver_port))
+    sock.listen(5)
+    log(f"Pi receiver listening on {args.receiver_host}:{args.receiver_port} (TLS)")
+
+    while True:
+        try:
+            raw_conn, addr = sock.accept()
+        except OSError as e:
+            log(f"receiver accept failed: {e}")
+            continue
+
+        threading.Thread(
+            target=receiver.handle_client,
+            args=(raw_conn, addr, cfg, ctx, lock),
+            daemon=True,
+        ).start()
+
+
+if __name__ == "__main__":
+    main()
