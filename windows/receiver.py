@@ -32,7 +32,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
     peer = f"{addr[0]}:{addr[1]}"
     try:
         conn = ctx.wrap_socket(raw_conn, server_side=True)
-    except ssl.SSLError as e:
+    except (ssl.SSLError, OSError) as e:
         log(f"{peer}: TLS handshake failed: {e}")
         raw_conn.close()
         return
