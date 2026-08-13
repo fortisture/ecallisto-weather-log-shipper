@@ -19,6 +19,18 @@ pi/sender.py                              windows/receiver.py
                                              under incoming_logs/
 ```
 
+eCallisto rotates to a new CSV file each day (UTC); within a day, rows are
+appended to that day's file. Both are handled without any special-casing:
+new files are picked up the moment they appear (the watch directory is
+re-scanned every poll), and appends are detected by comparing each file's
+current size against the last-seen offset.
+
+**First run against a directory that already has old files in it ships
+their full existing contents**, not just rows appended from that point on
+— there's no "only watch what's new" mode. If you're pointing `sender.py`
+at a directory with weeks of prior daily logs, expect that history to be
+shipped once on the very first start.
+
 **Security model:** TLS encryption, the sender is pinned to the receiver's
 exact certificate fingerprint (refuses to talk to anything else), and every
 connection must present a shared-secret token or gets a `DENY`. No cloud,
