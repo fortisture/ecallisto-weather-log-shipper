@@ -37,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "rag-web-ui", "web")
 DEFAULT_WEATHER_DIR = os.path.join(HERE, "data", "weather")
 DEFAULT_FITS_DIR = os.path.join(HERE, "data", "fits")
+DEFAULT_POWER_DIR = os.path.join(HERE, "data", "power")
 
 FITS_NAME = re.compile(r"^[A-Za-z0-9-]+_(\d{8})_(\d{6})_\d{2}\.fit\.gz$")
 
@@ -185,7 +186,7 @@ def serve_http(host, port, fits_dir):
 # Watcher
 # --------------------------------------------------------------------
 
-def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval, failsafe_hours):
+def watch_and_generate(generator, weather_dir, power_dir, api_dir, fits_dir, interval, failsafe_hours):
     """Rebuild derived files when the stores change.
 
     Normally this is change-driven: nothing changed, nothing is rebuilt.
@@ -197,6 +198,7 @@ def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval, fail
     not change.
     """
     last_weather = None
+    last_power = None
     last_fits = None
     next_failsafe = time.time() + failsafe_hours * 3600 if failsafe_hours > 0 else None
 
@@ -215,6 +217,12 @@ def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval, fail
                 log(f"weather API rebuilt: {total} readings")
                 last_weather = digest
 
+            power_digest = generator.hash_dir(power_dir)
+            if forced or power_digest != last_power:
+                count = generator.generate_power(power_dir, os.path.join(api_dir, "power"))
+                log(f"power API rebuilt: {count} readings")
+                last_power = power_digest
+
             fits_state = fits_fingerprint(fits_dir)
             if forced or fits_state != last_fits:
                 index = build_fits_index(fits_dir, api_dir)
@@ -224,7 +232,7 @@ def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval, fail
                 )
                 last_fits = fits_state
 
-            clean_stale_temp_files(weather_dir, fits_dir, api_dir)
+            clean_stale_temp_files(weather_dir, power_dir, fits_dir, api_dir)
 
         except Exception as e:
             # A watcher crash must never take the server down, and must
@@ -233,6 +241,7 @@ def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval, fail
             # the next pass) and keeps going.
             log(f"watcher error: {e!r} -- forcing a rebuild next pass")
             last_weather = None
+            last_power = None
             last_fits = None
 
         time.sleep(interval)
@@ -279,6 +288,7 @@ def main():
     ap.add_argument("--http-port", type=int, default=8090)
     ap.add_argument("--weather-dir", default=DEFAULT_WEATHER_DIR)
     ap.add_argument("--fits-dir", default=DEFAULT_FITS_DIR)
+    ap.add_argument("--power-dir", default=DEFAULT_POWER_DIR)
     ap.add_argument("--api-dir", default=os.path.join(WEB_DIR, "api"))
     ap.add_argument("--poll-interval", type=float, default=2.0)
     ap.add_argument(
@@ -298,10 +308,12 @@ def main():
     args = ap.parse_args()
 
     weather_dir = os.path.abspath(args.weather_dir)
+    power_dir = os.path.abspath(args.power_dir)
     fits_dir = os.path.abspath(args.fits_dir)
     api_dir = os.path.abspath(args.api_dir)
 
     os.makedirs(weather_dir, exist_ok=True)
+    os.makedirs(power_dir, exist_ok=True)
     os.makedirs(fits_dir, exist_ok=True)
 
     generator = load_module(
@@ -310,6 +322,7 @@ def main():
     )
 
     log(f"weather store: {weather_dir}")
+    log(f"power store:   {power_dir}")
     log(f"FITS store:    {fits_dir}")
 
     if not args.no_receiver:
@@ -321,14 +334,14 @@ def main():
             receiver = load_module("receiver", os.path.join(HERE, "windows", "receiver.py"))
             thread = threading.Thread(
                 target=run_receiver,
-                args=(receiver, args, weather_dir),
+                args=(receiver, args, weather_dir, power_dir),
                 daemon=True,
             )
             thread.start()
 
     watcher = threading.Thread(
         target=watch_and_generate,
-        args=(generator, weather_dir, api_dir, fits_dir,
+        args=(generator, weather_dir, power_dir, api_dir, fits_dir,
               args.poll_interval, args.failsafe_hours),
         daemon=True,
     )
@@ -343,7 +356,7 @@ def main():
         log("shutting down")
 
 
-def run_receiver(receiver, args, weather_dir):
+def run_receiver(receiver, args, weather_dir, power_dir):
     """Drive windows/receiver.py's connection handler on our own socket."""
     import socket
     import ssl
@@ -351,7 +364,8 @@ def run_receiver(receiver, args, weather_dir):
     with open(args.token_file) as f:
         token = f.read().strip()
 
-    cfg = {"token": token, "outdir": weather_dir, "blobdir": args.fits_dir}
+    cfg = {"token": token, "outdir": weather_dir,
+           "blobdir": args.fits_dir, "powerdir": power_dir}
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)

@@ -18,6 +18,7 @@ can read this.
 7. [Part four: the server that ties it together](#7-part-four-the-server-that-ties-it-together)
 8. [Part five: turning CSV into something a webpage can use](#8-part-five-turning-csv-into-something-a-webpage-can-use)
 9. [Part six: the weather dashboard](#9-part-six-the-weather-dashboard)
+9b. [The power page](#9b-the-power-page)
 10. [Part seven: the spectrogram viewer](#10-part-seven-the-spectrogram-viewer)
 11. [Part eight: the helper scripts](#11-part-eight-the-helper-scripts)
 12. [How to run the whole thing](#12-how-to-run-the-whole-thing)
@@ -642,6 +643,95 @@ property for equipment at a remote observatory.
 
 ---
 
+## 9b. The power page
+
+**File: `rag-web-ui/web/power.html`**
+
+The station's own health telemetry — four powered subsystems:
+
+| Rail | What it is | Typical |
+|---|---|---|
+| **Dew heater** | Keeps condensation off the optics/antenna | 12 V, 0–1800 mA, duty-cycled |
+| **LNA** | Low-noise amplifier — the first thing the signal hits | 12 V, ~90 mA, steady |
+| **CALLISTO** | The spectrometer itself | 12 V, ~420 mA, steady |
+| **BME sensor** | The environmental sensor (temp/humidity/pressure) | 3.3 V, ~3 mA |
+
+### Watts are calculated, not logged
+
+Only volts and milliamps are recorded. Power is derived:
+
+```python
+def rail_watts(reading, key):
+    volts = reading.get(key + "_v")
+    milliamps = reading.get(key + "_ma")
+    if volts is None or milliamps is None:
+        return None
+    return round(volts * milliamps / 1000.0, 3)
+```
+
+If watts were logged as a third column, it could drift out of agreement
+with the two numbers it's supposed to come from — and then you'd have no
+way to know which one to believe. Deriving it makes that impossible.
+
+Same reason `None` is returned rather than 0 when a measurement is
+missing: zero watts is a *claim* ("nothing is drawing power"), which is a
+very different statement from "we didn't measure it."
+
+### Why four separate current charts
+
+The heater peaks near 1800 mA; the BME sensor draws about 3 mA. That's a
+600:1 ratio. On one shared axis the BME, LNA and CALLISTO traces would all
+be flattened into the baseline and you'd effectively have a heater chart
+with three invisible lines on it.
+
+So each rail gets its own small chart with its own scale. The BME chart
+also uses two decimal places where the others use none — 0.1 mA is noise
+on a heater and meaningful signal on a 3 mA sensor.
+
+Voltages *do* share one chart, because they're all in volts and within a
+similar range (3.3 and 12), so a shared axis is honest there.
+
+### How the data gets there
+
+The Pi ships power CSVs over the same authenticated connection as
+everything else. The receiver routes them by filename:
+
+```python
+POWER_HINTS = ("power", "psu", "rail", "volt", "current")
+
+def csv_store_root(cfg, name):
+    lowered = name.lower()
+    if cfg.get("powerdir") and any(hint in lowered for hint in POWER_HINTS):
+        return cfg["powerdir"]
+    return cfg["outdir"]      # anything else is weather
+```
+
+Filename routing is used because a `ROW` message carries only a filename
+and a row — there is no "stream" field in the protocol. Naming the log
+`power_20260813.csv` is enough.
+
+### The demo data is simulated — and says so
+
+`simulate_demo_power.py` **invents** these numbers. There is no external
+source for one specific station's power rails, unlike the weather (which
+comes from real Open-Meteo observations). The file says so at the top, and
+so does its output.
+
+It does one thing worth knowing: the heater duty cycle is driven off the
+**real** weather store. The heater runs harder as air temperature closes
+on the dew point, which is physically when condensation forms:
+
+```python
+duty = max(0.0, min(1.0, (6.0 - margin) / 5.0))   # margin = temp - dewpoint
+heater_ma = 60 + duty * 1750 + random.gauss(0, 25)
+heater_v  = 12.15 - duty * 0.35 + random.gauss(0, 0.02)   # rail sags under load
+```
+
+So the heater trace lines up with the dew-point chart on the weather page,
+and the supply voltage dips slightly when the heater pulls hard — the way
+a real 12 V rail behaves. Delete this script once the real hardware
+reports.
+
 ## 10. Part seven: the spectrogram viewer
 
 **File: `rag-web-ui/web/fits.html`**
@@ -982,6 +1072,11 @@ Real bugs, found by testing rather than reading:
   September 2025.** The archive has data for 2024-08-11, mid-2025, and
   2025-08-01 → 2025-09-09, then nothing on any 2026 date checked. The three
   days stored locally are the most recent that exist.
+
+- **The power figures are entirely simulated.** Unlike the weather, there
+  is no external source for this station's own rails, so
+  `simulate_demo_power.py` invents them. They are physically plausible and
+  the heater responds to the real weather, but they are not measurements.
 
 - **The weather data currently displayed is real but not from your Pi.**
   It's measured data for Višnjan's coordinates from Open-Meteo, standing in

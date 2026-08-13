@@ -96,6 +96,26 @@ def store_path(root, name):
     return os.path.join(root, *parts, name) if parts else os.path.join(root, UNDATED_DIR, name)
 
 
+# Which CSVs are power-rail telemetry rather than weather. Routed on the
+# filename because that is all a ROW message carries -- the station names
+# these logs e.g. power_20260813.csv.
+POWER_HINTS = ("power", "psu", "rail", "volt", "current")
+
+
+def csv_store_root(cfg, name):
+    """Pick the store a CSV belongs in.
+
+    Weather and power telemetry arrive over the same connection and both
+    look like CSV rows, so they are separated by filename. Anything that
+    doesn't look like power telemetry falls through to the weather store,
+    which keeps the original behaviour for existing deployments.
+    """
+    lowered = name.lower()
+    if cfg.get("powerdir") and any(hint in lowered for hint in POWER_HINTS):
+        return cfg["powerdir"]
+    return cfg["outdir"]
+
+
 def read_exactly(stream, length):
     """Read exactly `length` bytes, or fail. Anything less means the
     connection died mid-payload and the stream can't be trusted."""
@@ -179,7 +199,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                 if not name:
                     log(f"{peer}: rejected unsafe filename {raw_name!r}")
                     continue
-                out_path = store_path(cfg["outdir"], name)
+                out_path = store_path(csv_store_root(cfg, name), name)
                 with lock:
                     os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     with open(out_path, "a", encoding="utf-8", newline="") as out:
@@ -206,7 +226,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                     if not name:
                         log(f"{peer}: rejected unsafe filename in FILE, discarded {length} bytes")
                         continue
-                    out_path = store_path(cfg["outdir"], name)
+                    out_path = store_path(csv_store_root(cfg, name), name)
                     file_count += 1
                 else:
                     name = safe_blob_name(raw)
@@ -240,14 +260,17 @@ def main():
     ap.add_argument("--token-file", default="token.txt")
     ap.add_argument("--outdir", default="incoming_logs")
     ap.add_argument("--blobdir", default=None, help="where to store incoming spectrograms")
+    ap.add_argument("--powerdir", default=None, help="where to store incoming power telemetry")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
-    if args.blobdir:
-        os.makedirs(args.blobdir, exist_ok=True)
+    for extra in (args.blobdir, args.powerdir):
+        if extra:
+            os.makedirs(extra, exist_ok=True)
     with open(args.token_file) as f:
         token = f.read().strip()
-    cfg = {"token": token, "outdir": args.outdir, "blobdir": args.blobdir}
+    cfg = {"token": token, "outdir": args.outdir,
+           "blobdir": args.blobdir, "powerdir": args.powerdir}
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)

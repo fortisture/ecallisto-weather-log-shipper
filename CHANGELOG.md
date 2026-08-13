@@ -5,6 +5,34 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [3.3.0] - 2026-08-13
+
+### Added
+- **Power page** (`rag-web-ui/web/power.html`) and a third nav tab,
+  monitoring the station's four powered subsystems: dew heater, LNA, the
+  CALLISTO receiver, and the BME environmental sensor. Shows total draw,
+  per-rail volts/milliamps/watts, a per-rail current chart and a shared
+  voltage chart, over the same 24H/7D/30D/all range selector.
+- Power telemetry store at `data/power/YYYY/MM/DD/`. The receiver routes
+  any incoming CSV whose filename suggests power telemetry (`power`,
+  `psu`, `rail`, `volt`, `current`) to it, so the Pi can ship rails and
+  weather over the same authenticated connection.
+- `generate_power()` in the dashboard generator, reusing the existing
+  timestamp normalisation and data-gap detection.
+- `rag-web-ui/simulate_demo_power.py` — SIMULATED rail telemetry for
+  development. Unlike the weather fetcher there is no real external source
+  for this station's own rails, so these numbers are invented; the heater
+  duty cycle is driven off the real weather store (it runs as air
+  temperature closes on the dew point) so the trace stays physically
+  coherent with the weather page.
+
+### Notes
+- Watts are derived from volts x milliamps rather than logged, so the
+  figure can never contradict the two measurements behind it.
+- Each rail gets its own current chart rather than four series sharing one
+  axis: the heater peaks near 1800 mA and the BME sits around 3 mA, so a
+  shared scale would flatten three of the four into the baseline.
+
 ## [3.2.0] - 2026-08-13
 
 ### Changed

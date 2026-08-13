@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>DORM · Power</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="./styles.css">
+
+  <script src="./vendor/chart.js"></script>
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+    <nav class="site-nav">
+      <a href="./index.html">Weather</a>
+      <a href="./power.html" class="is-current" aria-current="page">Power</a>
+      <a href="./fits.html">Spectrograms</a>
+    </nav>
+
+
+    <header>
+
+      <div class="id-block">
+        <div class="eyebrow">Višnjan · Station Health</div>
+        <h1>DORM <span>/ Power Rails</span></h1>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="dot" id="status-dot"></span>
+          <span id="connection-status">INITIALIZING</span>
+        </div>
+        <div id="last-updated">WAITING FOR DATA</div>
+        <div id="last-updated-local" class="status-sub">&nbsp;</div>
+        <div id="refresh-age" class="status-sub">&nbsp;</div>
+      </div>
+
+    </header>
+
+
+    <div id="error-panel" class="error-panel"></div>
+
+
+    <div class="range-bar" role="group" aria-label="Time range">
+
+      <span class="range-label">Range</span>
+
+      <div class="range-buttons">
+        <button type="button" class="range-btn is-active" data-hours="24">24H</button>
+        <button type="button" class="range-btn" data-hours="168">7D</button>
+        <button type="button" class="range-btn" data-hours="720">30D</button>
+        <button type="button" class="range-btn" data-hours="0">ALL</button>
+      </div>
+
+      <span class="range-summary" id="range-summary">—</span>
+
+    </div>
+
+
+    <!-- ===================== TOTAL DRAW ===================== -->
+
+    <section class="panel">
+
+      <div class="panel-head">
+        <span class="label">Total Draw</span>
+        <span class="tag" id="conditions-tag">LATEST READING</span>
+      </div>
+
+      <div class="conditions">
+
+        <div>
+          <div class="reading-main">
+            <span class="reading-value" id="current-total">—</span>
+            <span class="reading-unit">W</span>
+          </div>
+
+          <div class="reading-sub" id="current-timestamp">AWAITING READING</div>
+          <div class="reading-sub" id="current-timestamp-local">&nbsp;</div>
+        </div>
+
+        <div class="telemetry-strip">
+
+          <div class="telemetry-cell">
+            <div class="t-label" id="stat-min-label">24H Min</div>
+            <div class="t-value" id="stat-min">—</div>
+          </div>
+
+          <div class="telemetry-cell ok">
+            <div class="t-label" id="stat-avg-label">24H Avg</div>
+            <div class="t-value" id="stat-avg">—</div>
+          </div>
+
+          <div class="telemetry-cell warn">
+            <div class="t-label" id="stat-max-label">24H Max</div>
+            <div class="t-value" id="stat-max">—</div>
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- Per-rail current state -->
+      <div class="rail-strip" id="rail-strip"></div>
+
+    </section>
+
+
+    <!-- ===================== CHARTS ===================== -->
+
+    <div class="chart-grid">
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">Dew Heater · Current</span>
+          <span class="tag">mA</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="heater-chart"></canvas>
+          <div id="chart-fallback" class="chart-fallback">
+            <span class="chart-fallback-dot"></span>
+            CHART LIBRARY UNAVAILABLE
+          </div>
+        </div>
+        <div class="chart-footer">
+          <span id="heater-range">—</span>
+          <span id="heater-current">—</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">LNA · Current</span>
+          <span class="tag">mA</span>
+        </div>
+        <div class="chart-body"><canvas id="lna-chart"></canvas></div>
+        <div class="chart-footer">
+          <span id="lna-range">—</span>
+          <span id="lna-current">—</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">CALLISTO · Current</span>
+          <span class="tag">mA</span>
+        </div>
+        <div class="chart-body"><canvas id="callisto-chart"></canvas></div>
+        <div class="chart-footer">
+          <span id="callisto-range">—</span>
+          <span id="callisto-current">—</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">BME Sensor · Current</span>
+          <span class="tag">mA</span>
+        </div>
+        <div class="chart-body"><canvas id="bme-chart"></canvas></div>
+        <div class="chart-footer">
+          <span id="bme-range">—</span>
+          <span id="bme-current">—</span>
+        </div>
+      </section>
+
+    </div>
+
+
+    <!-- ===================== VOLTAGE ===================== -->
+
+    <section class="panel chart-panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">Supply Voltage · All Rails</span>
+        <span class="tag">V</span>
+      </div>
+      <div class="chart-body"><canvas id="voltage-chart"></canvas></div>
+      <div class="chart-footer">
+        <span id="voltage-range">—</span>
+        <span id="voltage-note">12 V rails and the 3.3 V sensor rail</span>
+      </div>
+    </section>
+
+
+    <footer class="page-footer">
+      DORM GROUND SUPPORT · VIŠNJAN · POWER TELEMETRY · UTC AND LOCAL
+    </footer>
+
+  </div>
+
+
+  <script>
+
+    /*
+     * ============================================================
+     * DORM POWER DASHBOARD
+     * ============================================================
+     *
+     * Reads ./api/power/latest.json and history.json, written by
+     * server.py from the CSVs in data/power/.
+     *
+     * Four rails are monitored: the dew heater, the LNA, the
+     * CALLISTO receiver itself, and the BME environmental sensor.
+     * Each contributes a voltage and a current; power (W) is
+     * DERIVED from those two rather than logged, so it can never
+     * disagree with them.
+     *
+     * Currents get one small chart each rather than four series on
+     * one axis: the heater draws up to ~1800 mA and the BME about
+     * 3 mA, so a shared scale would flatten three of the four into
+     * the baseline. Voltages share a chart because they are all in
+     * the same unit and a similar range.
+     * ============================================================
+     */
+
+    const LATEST_URL = "./api/power/latest.json";
+    const HISTORY_URL = "./api/power/history.json";
+
+    /* Same validated categorical palette as the weather page --
+     * checked for colour-blind separation and contrast against this
+     * panel surface. */
+    const RAILS = [
+      { key: "heater",   label: "Dew heater", color: "#d95926" },
+      { key: "lna",      label: "LNA",        color: "#3987e5" },
+      { key: "callisto", label: "CALLISTO",   color: "#199e70" },
+      { key: "bme",      label: "BME sensor", color: "#c98500" }
+    ];
+
+    const MEDIAN_LINE = "#8FA0B3";
+    const MAX_POINTS = 600;
+
+    const charts = {};
+    let allReadings = [];
+    let latestReading = null;
+    let selectedHours = 24;
+    let lastFetchAt = null;
+
+
+    function element(id) { return document.getElementById(id); }
+
+    function setText(id, value) {
+      const node = element(id);
+      if (node) node.textContent = value;
+    }
+
+    function showError(message) {
+      const panel = element("error-panel");
+      panel.textContent = message;
+      panel.style.display = "block";
+      setText("connection-status", "DATA: ERROR");
+      setText("last-updated", "SYNC FAILED");
+      element("status-dot").style.background = "#E85D5D";
+    }
+
+    function clearError() {
+      const panel = element("error-panel");
+      panel.textContent = "";
+      panel.style.display = "none";
+      element("status-dot").style.background = "var(--signal)";
+    }
+
+
+    async function fetchJSON(url) {
+      let response;
+      try {
+        response = await fetch(url + "?_=" + Date.now(), { cache: "no-store" });
+      }
+      catch (e) {
+        throw new Error(
+          "Could not fetch:\n" + url + "\n\n" + e.message +
+          "\n\nStart the station server:  python server.py"
+        );
+      }
+      if (!response.ok) {
+        throw new Error(
+          "Not found:\n" + url + "\n\nHTTP " + response.status +
+          "\n\nNo power telemetry stored yet. The Pi ships any CSV whose\n" +
+          "name contains \"power\"; for a demo run:\n" +
+          "python rag-web-ui/simulate_demo_power.py"
+        );
+      }
+      return response.json();
+    }
+
+
+    // ---------- time ----------
+
+    function parseDate(value) {
+      if (!value) throw new Error("Missing timestamp");
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) throw new Error("Invalid timestamp: " + value);
+      return date;
+    }
+
+    function fmtUTC(value) {
+      return parseDate(value).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+    }
+
+    function fmtUTCTime(value) {
+      return parseDate(value).toISOString().slice(11, 16) + " UTC";
+    }
+
+    function fmtUTCDate(value) {
+      return parseDate(value).toISOString().slice(0, 10);
+    }
+
+    function localZoneName(date) {
+      try {
+        const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+          .formatToParts(date);
+        const zone = parts.find(p => p.type === "timeZoneName");
+        if (zone && zone.value) return zone.value;
+      }
+      catch (e) { /* fall through */ }
+
+      const offset = -date.getTimezoneOffset();
+      const sign = offset >= 0 ? "+" : "-";
+      const abs = Math.abs(offset);
+      return "UTC" + sign + String(Math.floor(abs / 60)).padStart(2, "0") +
+        ":" + String(abs % 60).padStart(2, "0");
+    }
+
+    function fmtLocal(value) {
+      const date = parseDate(value);
+      const stamp = date.getFullYear() + "-" +
+        String(date.getMonth() + 1).padStart(2, "0") + "-" +
+        String(date.getDate()).padStart(2, "0") + " " +
+        String(date.getHours()).padStart(2, "0") + ":" +
+        String(date.getMinutes()).padStart(2, "0");
+      return stamp + " " + localZoneName(date);
+    }
+
+    function fmtAgo(from) {
+      const s = Math.max(0, Math.round((Date.now() - from.getTime()) / 1000));
+      if (s < 60) return s + "S AGO";
+      if (s < 3600) return Math.floor(s / 60) + "M AGO";
+      if (s < 86400) return Math.floor(s / 3600) + "H AGO";
+      return Math.floor(s / 86400) + "D AGO";
+    }
+
+
+    // ---------- numbers ----------
+
+    function numberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function fmt(value, decimals) {
+      const n = numberOrNull(value);
+      return n === null ? "—" : n.toFixed(decimals);
+    }
+
+    /* Watts = volts x amps. Derived here, never read from the file. */
+    function watts(reading, key) {
+      const v = numberOrNull(reading[key + "_v"]);
+      const ma = numberOrNull(reading[key + "_ma"]);
+      return (v === null || ma === null) ? null : v * ma / 1000;
+    }
+
+    function totalWatts(reading) {
+      let sum = 0;
+      let any = false;
+      RAILS.forEach(rail => {
+        const w = watts(reading, rail.key);
+        if (w !== null) { sum += w; any = true; }
+      });
+      return any ? sum : null;
+    }
+
+    function medianOf(values) {
+      const clean = values.filter(v => v !== null && v !== undefined).sort((a, b) => a - b);
+      if (!clean.length) return null;
+      const mid = Math.floor(clean.length / 2);
+      return clean.length % 2 ? clean[mid] : (clean[mid - 1] + clean[mid]) / 2;
+    }
+
+
+    // ---------- range ----------
+
+    function readingsInRange(readings, hours) {
+      if (!readings.length) return [];
+      if (!hours || hours <= 0) return readings.slice();
+      const newest = parseDate(readings[readings.length - 1].timestamp).getTime();
+      const cutoff = newest - hours * 3600 * 1000;
+      return readings.filter(r => parseDate(r.timestamp).getTime() >= cutoff);
+    }
+
+    function downsample(readings, maxPoints) {
+      if (readings.length <= maxPoints) return readings;
+      const stride = Math.ceil(readings.length / maxPoints);
+      const out = [];
+      for (let i = 0; i < readings.length; i += stride) out.push(readings[i]);
+      const last = readings[readings.length - 1];
+      if (out[out.length - 1] !== last) out.push(last);
+      return out;
+    }
+
+    function rangeName(hours) {
+      if (!hours || hours <= 0) return "All";
+      if (hours === 24) return "24H";
+      if (hours % 168 === 0) return (hours / 168) + "W";
+      if (hours % 24 === 0) return (hours / 24) + "D";
+      return hours + "H";
+    }
+
+
+    // ---------- charts ----------
+
+    function chartOptions(unit, decimals) {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: "bottom",
+            align: "start",
+            labels: {
+              boxWidth: 18, boxHeight: 1, padding: 12,
+              color: "#6B7A8B",
+              font: { family: "IBM Plex Mono", size: 10 },
+              usePointStyle: false
+            }
+          },
+          tooltip: {
+            backgroundColor: "#151D27",
+            borderColor: "#263140",
+            borderWidth: 1,
+            titleColor: "#6B7A8B",
+            bodyColor: "#DCE4EC",
+            padding: 10,
+            displayColors: false,
+            titleFont: { family: "IBM Plex Mono", size: 10 },
+            bodyFont: { family: "IBM Plex Mono", size: 12 },
+            callbacks: {
+              label: item => item.parsed.y === null
+                ? "no data"
+                : (item.dataset.label || "") + "  " +
+                  item.parsed.y.toFixed(decimals) + " " + unit
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: "#1A2229", drawTicks: false },
+            ticks: {
+              color: "#45525F", maxTicksLimit: 7, maxRotation: 0, autoSkip: true,
+              font: { family: "IBM Plex Mono", size: 10 }
+            },
+            border: { color: "#263140" }
+          },
+          y: {
+            grid: { color: "#1A2229", drawTicks: false },
+            ticks: {
+              color: "#45525F",
+              font: { family: "IBM Plex Mono", size: 10 },
+              callback: value => Number(value).toFixed(decimals)
+            },
+            border: { display: false }
+          }
+        }
+      };
+    }
+
+
+    function hexToRgba(hex, alpha) {
+      const v = hex.replace("#", "");
+      return `rgba(${parseInt(v.slice(0,2),16)}, ${parseInt(v.slice(2,4),16)}, ${parseInt(v.slice(4,6),16)}, ${alpha})`;
+    }
+
+
+    function buildCurrentChart(rail, labels, values, decimals) {
+      const canvasId = rail.key + "-chart";
+      const canvas = element(canvasId);
+      if (!canvas) return;
+
+      const median = medianOf(values);
+      const medianSeries = values.map(() => median);
+      const medianLabel = "Median " + (median === null ? "—" : median.toFixed(decimals) + " mA");
+
+      if (charts[canvasId]) {
+        charts[canvasId].data.labels = labels;
+        charts[canvasId].data.datasets[0].data = values;
+        charts[canvasId].data.datasets[1].data = medianSeries;
+        charts[canvasId].data.datasets[1].label = medianLabel;
+        charts[canvasId].update("none");
+        return;
+      }
+
+      const ctx = canvas.getContext("2d");
+      const gradient = ctx.createLinearGradient(0, 0, 0, 260);
+      gradient.addColorStop(0, hexToRgba(rail.color, 0.10));
+      gradient.addColorStop(1, hexToRgba(rail.color, 0));
+
+      charts[canvasId] = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: rail.label,
+              data: values,
+              borderColor: rail.color,
+              backgroundColor: gradient,
+              borderWidth: 2,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              pointHoverBackgroundColor: rail.color,
+              pointHoverBorderColor: "#0A0E13",
+              pointHoverBorderWidth: 2,
+              fill: true,
+              tension: 0.25,
+              spanGaps: false,
+              order: 1
+            },
+            {
+              label: medianLabel,
+              data: medianSeries,
+              borderColor: MEDIAN_LINE,
+              borderWidth: 1,
+              borderDash: [5, 4],
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              fill: false,
+              tension: 0,
+              order: 2
+            }
+          ]
+        },
+        options: chartOptions("mA", decimals)
+      });
+    }
+
+
+    function buildVoltageChart(labels, plotted) {
+      const canvasId = "voltage-chart";
+      const canvas = element(canvasId);
+      if (!canvas) return;
+
+      const datasets = RAILS.map(rail => ({
+        label: rail.label,
+        data: plotted.map(r => numberOrNull(r[rail.key + "_v"])),
+        borderColor: rail.color,
+        backgroundColor: "transparent",
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBackgroundColor: rail.color,
+        pointHoverBorderColor: "#0A0E13",
+        pointHoverBorderWidth: 2,
+        fill: false,
+        tension: 0.25,
+        spanGaps: false
+      }));
+
+      if (charts[canvasId]) {
+        charts[canvasId].data.labels = labels;
+        datasets.forEach((d, i) => { charts[canvasId].data.datasets[i].data = d.data; });
+        charts[canvasId].update("none");
+        return;
+      }
+
+      charts[canvasId] = new Chart(element(canvasId).getContext("2d"), {
+        type: "line",
+        data: { labels, datasets },
+        options: chartOptions("V", 2)
+      });
+    }
+
+
+    // ---------- rendering ----------
+
+    function renderRailCards() {
+      const strip = element("rail-strip");
+      strip.innerHTML = "";
+
+      RAILS.forEach(rail => {
+        const v = latestReading ? numberOrNull(latestReading[rail.key + "_v"]) : null;
+        const ma = latestReading ? numberOrNull(latestReading[rail.key + "_ma"]) : null;
+        const w = latestReading ? watts(latestReading, rail.key) : null;
+
+        const cell = document.createElement("div");
+        cell.className = "rail-cell";
+        cell.innerHTML =
+          '<div class="rail-head">' +
+            '<span class="rail-swatch" style="background:' + rail.color + '"></span>' +
+            '<span class="rail-name">' + rail.label + "</span>" +
+          "</div>" +
+          '<div class="rail-values">' +
+            '<div><span class="rail-num">' + fmt(v, 2) + '</span><span class="rail-unit">V</span></div>' +
+            '<div><span class="rail-num">' + fmt(ma, 1) + '</span><span class="rail-unit">mA</span></div>' +
+            '<div><span class="rail-num">' + fmt(w, 2) + '</span><span class="rail-unit">W</span></div>' +
+          "</div>";
+        strip.appendChild(cell);
+      });
+    }
+
+
+    function renderAll() {
+      const windowed = readingsInRange(allReadings, selectedHours);
+      const plotted = downsample(windowed, MAX_POINTS);
+      const label = rangeName(selectedHours);
+      const longRange = !selectedHours || selectedHours > 48;
+
+      const labels = plotted.map(r => {
+        try {
+          return longRange
+            ? fmtUTCDate(r.timestamp).slice(5) + " " + fmtUTCTime(r.timestamp).slice(0, 5)
+            : fmtUTCTime(r.timestamp);
+        }
+        catch (e) { return ""; }
+      });
+
+      if (latestReading) {
+        setText("current-total", fmt(totalWatts(latestReading), 2));
+        setText("current-timestamp", "READING AT " + fmtUTC(latestReading.timestamp));
+        setText("current-timestamp-local", "LOCAL " + fmtLocal(latestReading.timestamp));
+        setText("last-updated", "SYNCED " + fmtUTC(latestReading.timestamp));
+        setText("last-updated-local", "LOCAL " + fmtLocal(latestReading.timestamp));
+        setText("connection-status", "DATA: POWER ONLINE");
+      }
+
+      renderRailCards();
+
+      // Total-draw statistics over the selected window.
+      const totals = windowed.map(totalWatts).filter(v => v !== null);
+      setText("stat-min-label", label + " Min");
+      setText("stat-avg-label", label + " Avg");
+      setText("stat-max-label", label + " Max");
+
+      if (totals.length) {
+        const avg = totals.reduce((s, v) => s + v, 0) / totals.length;
+        setText("stat-min", Math.min(...totals).toFixed(2) + " W");
+        setText("stat-avg", avg.toFixed(2) + " W");
+        setText("stat-max", Math.max(...totals).toFixed(2) + " W");
+      }
+      else {
+        setText("stat-min", "—");
+        setText("stat-avg", "—");
+        setText("stat-max", "—");
+      }
+
+      if (windowed.length) {
+        setText("range-summary",
+          fmtUTCDate(windowed[0].timestamp) + " → " +
+          fmtUTCDate(windowed[windowed.length - 1].timestamp) +
+          "  ·  " + windowed.length + " READINGS");
+      }
+      else {
+        setText("range-summary", "NO DATA IN RANGE");
+      }
+
+      if (typeof Chart === "undefined") {
+        const fallback = element("chart-fallback");
+        if (fallback) fallback.style.display = "flex";
+        return;
+      }
+
+      RAILS.forEach(rail => {
+        // The BME draws single-digit milliamps; one decimal on a 1800 mA
+        // heater is noise, but on a 3 mA sensor it is the signal.
+        const decimals = rail.key === "bme" ? 2 : 0;
+        const values = plotted.map(r => numberOrNull(r[rail.key + "_ma"]));
+        buildCurrentChart(rail, labels, values, decimals);
+
+        const inRange = windowed.map(r => numberOrNull(r[rail.key + "_ma"]))
+                                .filter(v => v !== null);
+        setText(rail.key + "-range", inRange.length
+          ? label + " " + Math.min(...inRange).toFixed(decimals) +
+            " – " + Math.max(...inRange).toFixed(decimals) + " mA"
+          : "NO DATA");
+
+        setText(rail.key + "-current", latestReading
+          ? "NOW " + fmt(latestReading[rail.key + "_ma"], decimals) + " mA"
+          : "—");
+      });
+
+      buildVoltageChart(labels, plotted);
+
+      const volts = [];
+      windowed.forEach(r => RAILS.forEach(rail => {
+        const v = numberOrNull(r[rail.key + "_v"]);
+        if (v !== null) volts.push(v);
+      }));
+      setText("voltage-range", volts.length
+        ? label + " " + Math.min(...volts).toFixed(2) + " – " + Math.max(...volts).toFixed(2) + " V"
+        : "NO DATA");
+    }
+
+
+    function tickRefreshAge() {
+      if (!lastFetchAt) return;
+      setText("refresh-age", "UPDATED " + fmtAgo(lastFetchAt));
+    }
+
+
+    function wireRangeButtons() {
+      document.querySelectorAll(".range-btn").forEach(button => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("is-active"));
+          button.classList.add("is-active");
+          selectedHours = Number(button.dataset.hours);
+          renderAll();
+        });
+      });
+    }
+
+
+    async function loadDashboard() {
+      clearError();
+      try {
+        const latest = await fetchJSON(LATEST_URL);
+        const history = await fetchJSON(HISTORY_URL);
+
+        if (!history || !Array.isArray(history.readings)) {
+          throw new Error('history.json must contain: { "readings": [...] }');
+        }
+
+        allReadings = history.readings
+          .filter(r => r && r.timestamp)
+          .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+
+        /* latest.json nests its values per rail for readability; the
+         * charts want the flat row shape, so use the last real reading
+         * from history and fall back to the nested form for the header. */
+        latestReading = allReadings.length
+          ? allReadings.filter(r => !r.gap).slice(-1)[0] || null
+          : null;
+
+        if (!latestReading && latest && latest.rails) {
+          latestReading = { timestamp: latest.timestamp };
+          Object.entries(latest.rails).forEach(([key, rail]) => {
+            latestReading[key + "_v"] = rail.volts;
+            latestReading[key + "_ma"] = rail.milliamps;
+          });
+        }
+
+        lastFetchAt = new Date();
+        renderAll();
+        tickRefreshAge();
+
+        console.log("[DORM] power ready:", allReadings.length, "readings");
+      }
+      catch (e) {
+        console.error("[DORM] power dashboard failed", e);
+        showError(e.message);
+      }
+    }
+
+
+    wireRangeButtons();
+    loadDashboard();
+    setInterval(tickRefreshAge, 1000);
+    setInterval(loadDashboard, 60000);
+
+  </script>
+
+</body>
+
+</html>

@@ -184,6 +184,118 @@ def write_json_atomic(path, data):
     os.replace(tmp, path)
 
 
+# --------------------------------------------------------------------
+# Power rails
+# --------------------------------------------------------------------
+
+# The station's four powered subsystems. Each contributes a voltage and a
+# current column; power is derived rather than logged, so it can never
+# disagree with the two measurements it comes from.
+SUBSYSTEMS = (
+    ("heater", "Dew heater"),
+    ("lna", "LNA"),
+    ("callisto", "CALLISTO"),
+    ("bme", "BME sensor"),
+)
+
+
+def load_power_readings(power_dir):
+    readings = []
+
+    for path in find_csv_files(power_dir):
+        try:
+            with open(path, newline="", encoding="utf-8", errors="replace") as f:
+                reader = csv.DictReader(f)
+                if not reader.fieldnames:
+                    continue
+
+                ts_field = find_field(reader.fieldnames, "timestamp", "time", "datetime")
+                if not ts_field:
+                    continue
+
+                fields = {}
+                for key, _ in SUBSYSTEMS:
+                    fields[key + "_v"] = find_field(
+                        reader.fieldnames, key + "_v", key + "_volt", key + "_voltage"
+                    )
+                    fields[key + "_ma"] = find_field(
+                        reader.fieldnames, key + "_ma", key + "_current", key + "_i"
+                    )
+
+                # A file with a timestamp but none of our rails isn't power
+                # telemetry -- skip it rather than emitting empty rows.
+                if not any(fields.values()):
+                    continue
+
+                for row in reader:
+                    ts = normalize_timestamp(row.get(ts_field, "") or "")
+                    if ts is None:
+                        continue
+
+                    entry = {"timestamp": ts}
+                    for column, source in fields.items():
+                        entry[column] = parse_number(row.get(source)) if source else None
+                    readings.append(entry)
+
+        except (OSError, csv.Error):
+            continue
+
+    readings.sort(key=lambda r: r["timestamp"])
+    return readings
+
+
+def rail_watts(reading, key):
+    """Power for one rail, in watts, or None if either input is missing.
+
+    Derived here rather than logged so it can never contradict the volts
+    and milliamps it is computed from.
+    """
+    volts = reading.get(key + "_v")
+    milliamps = reading.get(key + "_ma")
+    if volts is None or milliamps is None:
+        return None
+    return round(volts * milliamps / 1000.0, 3)
+
+
+def generate_power(power_dir, api_dir):
+    readings = load_power_readings(power_dir)
+
+    if readings:
+        last = readings[-1]
+        latest = {"timestamp": last["timestamp"], "rails": {}}
+
+        total = 0.0
+        measured = False
+        for key, label in SUBSYSTEMS:
+            watts = rail_watts(last, key)
+            latest["rails"][key] = {
+                "label": label,
+                "volts": last.get(key + "_v"),
+                "milliamps": last.get(key + "_ma"),
+                "watts": watts,
+            }
+            if watts is not None:
+                total += watts
+                measured = True
+
+        latest["total_watts"] = round(total, 3) if measured else None
+        readings = insert_gap_markers(readings)
+    else:
+        latest = {
+            "timestamp": None,
+            "rails": {key: {"label": label, "volts": None, "milliamps": None, "watts": None}
+                      for key, label in SUBSYSTEMS},
+            "total_watts": None,
+        }
+
+    write_json_atomic(os.path.join(api_dir, "latest.json"), latest)
+    write_json_atomic(os.path.join(api_dir, "history.json"), {
+        "subsystems": [{"key": key, "label": label} for key, label in SUBSYSTEMS],
+        "readings": readings,
+    })
+    return len(readings)
+
+
 def generate(incoming_dir, api_dir, history_hours):
     readings = load_all_readings(incoming_dir)
 

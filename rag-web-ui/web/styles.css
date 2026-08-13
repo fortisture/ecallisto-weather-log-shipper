@@ -526,6 +526,85 @@ header {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- Power rails ---------- */
+
+.rail-strip {
+  display: grid;
+
+  grid-template-columns: repeat(4, 1fr);
+
+  gap: 1px;
+
+  background: var(--line-faint);
+
+  border-top: 1px solid var(--line-faint);
+}
+
+.rail-cell {
+  background: var(--panel);
+
+  padding: 12px 18px;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+
+  gap: 7px;
+
+  margin-bottom: 8px;
+}
+
+.rail-swatch {
+  width: 8px;
+  height: 8px;
+
+  border-radius: 2px;
+
+  flex: none;
+}
+
+.rail-name {
+  font-family: var(--font-mono);
+  font-size: 10px;
+
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+
+  color: var(--text-dim);
+}
+
+.rail-values {
+  display: flex;
+  gap: 14px;
+
+  flex-wrap: wrap;
+}
+
+.rail-num {
+  font-family: var(--font-mono);
+  font-size: 14px;
+
+  color: var(--text);
+
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-unit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+
+  color: var(--text-faint);
+
+  margin-left: 3px;
+}
+
+@media (max-width: 900px) {
+  .rail-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 /* ---------- Chart panel ---------- */
 
 .chart-grid {
