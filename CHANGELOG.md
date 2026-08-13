@@ -5,6 +5,16 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [2.0.1] - 2026-08-13
+
+### Fixed
+- `pi/setup_pi.sh`: `config.json` and the state directory were created via
+  `sudo` (root-owned), then `config.json` was `chmod 600`'d -- but the
+  systemd service runs as the installing user, not root, so it could
+  never open its own config file (`PermissionError: [Errno 13] Permission
+  denied`, crash-looping on every restart). Both are now `chown`'d to that
+  user before being locked down.
+
 ## [2.0.0] - 2026-08-13
 
 ### Changed

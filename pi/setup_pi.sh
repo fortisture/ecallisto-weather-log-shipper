@@ -30,10 +30,17 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-sudo mkdir -p "$INSTALL_DIR" /var/lib/ecallisto-weather-shipper
+RUN_USER="$(whoami)"
+STATE_DIR="/var/lib/ecallisto-weather-shipper"
+
+sudo mkdir -p "$INSTALL_DIR" "$STATE_DIR"
+# The service runs as $RUN_USER (not root), so it needs write access to the
+# state directory and read access to config.json -- both are created via
+# sudo below and would otherwise end up root-owned and inaccessible to it.
+sudo chown "$RUN_USER" "$STATE_DIR"
 sudo cp "$SCRIPT_DIR/sender.py" "$INSTALL_DIR/sender.py"
 
-sudo python3 - "$CONFIG_SRC" "$WATCH_DIR" "$INSTALL_DIR/config.json" <<'PYEOF'
+sudo python3 - "$CONFIG_SRC" "$WATCH_DIR" "$INSTALL_DIR/config.json" <<PYEOF
 import json, sys
 src, watch_dir, dst = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(src) as f:
@@ -42,14 +49,14 @@ for key in ("host", "port", "token", "fingerprint"):
     if key not in cfg or str(cfg[key]).startswith("REPLACE_WITH"):
         sys.exit(f"error: config field '{key}' is missing or still a placeholder")
 cfg["watch_dir"] = watch_dir
-cfg.setdefault("state_file", "/var/lib/ecallisto-weather-shipper/state.json")
+cfg.setdefault("state_file", "$STATE_DIR/state.json")
 with open(dst, "w") as f:
     json.dump(cfg, f, indent=2)
 PYEOF
 
+sudo chown "$RUN_USER" "$INSTALL_DIR/config.json"
 sudo chmod 600 "$INSTALL_DIR/config.json"
 
-RUN_USER="$(whoami)"
 sudo tee /etc/systemd/system/weather-shipper.service > /dev/null <<UNIT
 [Unit]
 Description=eCallisto weather log shipper
