@@ -5,6 +5,19 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [2.1.1] - 2026-08-13
+
+### Fixed
+- `rag-web-ui`: Chart.js was loaded from a CDN (`cdnjs.cloudflare.com`),
+  so the temperature chart silently fell back to "unavailable" wherever
+  that CDN wasn't reachable. Vendored Chart.js v4.4.4 locally
+  (`rag-web-ui/web/vendor/chart.js`) instead -- the dashboard no longer
+  depends on internet access to render.
+- Chart mark specs brought in line with dataviz best practice: line
+  weight 1.5px -> 2px, area-fill wash reduced from a fairly saturated 28%
+  opacity to a proper ~10% wash, and the hover-point ring width made
+  explicit (2px) instead of relying on Chart.js's default.
+
 ## [2.1.0] - 2026-08-13
 
 ### Added
