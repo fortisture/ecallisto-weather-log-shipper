@@ -1,0 +1,6 @@
+{
+  "host": "REPLACE_WITH_WINDOWS_PC_LAN_IP",
+  "port": 9443,
+  "token": "REPLACE_WITH_CONTENTS_OF_windows/token.txt",
+  "fingerprint": "REPLACE_WITH_CONTENTS_OF_windows/fingerprint.txt"
+}

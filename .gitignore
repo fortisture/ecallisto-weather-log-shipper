@@ -1,0 +1,16 @@
+# TLS material and secrets -- never commit these
+*.pem
+token.txt
+fingerprint.txt
+config.json
+
+# Runtime state and data
+incoming_logs/
+.sender_state.json
+.sender_state.json.tmp
+state.json
+*.csv
+!test-data/*.csv
+
+__pycache__/
+*.pyc
