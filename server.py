@@ -168,30 +168,81 @@ def serve_http(host, port, fits_dir):
 # Watcher
 # --------------------------------------------------------------------
 
-def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval):
+def watch_and_generate(generator, weather_dir, api_dir, fits_dir, interval, failsafe_hours):
+    """Rebuild derived files when the stores change.
+
+    Normally this is change-driven: nothing changed, nothing is rebuilt.
+    But "nothing changed" is also what a silently-stuck pipeline looks
+    like, so a failsafe pass runs on a timer regardless, rebuilding
+    everything from the stores on disk. That repairs the case where a
+    derived file was deleted, truncated or left half-written by a crash --
+    situations the change-detector cannot see, because the *source* did
+    not change.
+    """
     last_weather = None
     last_fits = None
+    next_failsafe = time.time() + failsafe_hours * 3600 if failsafe_hours > 0 else None
 
     while True:
         try:
+            forced = next_failsafe is not None and time.time() >= next_failsafe
+            if forced:
+                log(f"failsafe sweep ({failsafe_hours:g}h): rebuilding everything from disk")
+                next_failsafe = time.time() + failsafe_hours * 3600
+
+            missing = not os.path.exists(os.path.join(api_dir, "weather", "history.json"))
+
             digest = generator.hash_dir(weather_dir)
-            if digest != last_weather:
+            if forced or missing or digest != last_weather:
                 total, emitted = generator.generate(weather_dir, os.path.join(api_dir, "weather"), 0)
                 log(f"weather API rebuilt: {total} readings")
                 last_weather = digest
 
             fits_state = fits_fingerprint(fits_dir)
-            if fits_state != last_fits:
+            if forced or fits_state != last_fits:
                 index = build_fits_index(fits_dir, api_dir)
                 log(
                     f"FITS index rebuilt: {index['totals']['files']} files across "
                     f"{index['totals']['days_with_data']} day(s)"
                 )
                 last_fits = fits_state
-        except Exception as e:  # a watcher crash must not take the server down
-            log(f"watcher error: {e}")
+
+            clean_stale_temp_files(weather_dir, fits_dir, api_dir)
+
+        except Exception as e:
+            # A watcher crash must never take the server down, and must
+            # never leave the site silently frozen either -- so it logs
+            # loudly, forgets its cached state (forcing a full rebuild on
+            # the next pass) and keeps going.
+            log(f"watcher error: {e!r} -- forcing a rebuild next pass")
+            last_weather = None
+            last_fits = None
 
         time.sleep(interval)
+
+
+def clean_stale_temp_files(*dirs, max_age=3600):
+    """Remove .tmp/.part leftovers from an interrupted write.
+
+    A crash between "write temp" and "rename into place" leaves debris
+    that nothing will ever complete. Anything older than an hour is
+    certainly abandoned -- a real write takes milliseconds.
+    """
+    cutoff = time.time() - max_age
+    for root_dir in dirs:
+        if not os.path.isdir(root_dir):
+            continue
+        for root, _, files in os.walk(root_dir):
+            for name in files:
+                if not name.endswith((".tmp", ".part")):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                        log(f"removed stale temp file {path}")
+                except OSError:
+                    pass
 
 
 def fits_fingerprint(fits_dir):
@@ -217,6 +268,13 @@ def main():
     ap.add_argument("--fits-dir", default=DEFAULT_FITS_DIR)
     ap.add_argument("--api-dir", default=os.path.join(WEB_DIR, "api"))
     ap.add_argument("--poll-interval", type=float, default=2.0)
+    ap.add_argument(
+        "--failsafe-hours",
+        type=float,
+        default=6.0,
+        help="rebuild everything from disk on this interval regardless of "
+             "change detection, so a crash or deleted file self-heals (0 disables)",
+    )
 
     ap.add_argument("--no-receiver", action="store_true", help="serve only; don't accept Pi uploads")
     ap.add_argument("--receiver-host", default="0.0.0.0")
@@ -257,10 +315,14 @@ def main():
 
     watcher = threading.Thread(
         target=watch_and_generate,
-        args=(generator, weather_dir, api_dir, fits_dir, args.poll_interval),
+        args=(generator, weather_dir, api_dir, fits_dir,
+              args.poll_interval, args.failsafe_hours),
         daemon=True,
     )
     watcher.start()
+
+    if args.failsafe_hours > 0:
+        log(f"failsafe sweep every {args.failsafe_hours:g}h")
 
     try:
         serve_http(args.http_host, args.http_port, fits_dir)
@@ -276,7 +338,7 @@ def run_receiver(receiver, args, weather_dir):
     with open(args.token_file) as f:
         token = f.read().strip()
 
-    cfg = {"token": token, "outdir": weather_dir}
+    cfg = {"token": token, "outdir": weather_dir, "blobdir": args.fits_dir}
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)

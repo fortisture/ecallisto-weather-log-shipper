@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""eCallisto weather log receiver.
+"""eCallisto station receiver.
 
 TLS server that authenticates each incoming connection with a shared-secret
-token, then handles two message types from the sender:
+token, then handles three message types from the sender:
 
 - ROW <filename> <row content>  -- append one row to the matching local file.
 - FILE <filename> <byte length> -- replace the matching local file's entire
   content wholesale (used when the sender detects an in-place edit or a
   same-name truncation/rotation, not just an append).
+- BLOB <filename> <byte length> -- store a binary file (a CALLISTO
+  spectrogram) under --blobdir, filed into a per-day folder taken from the
+  filename's embedded date.
 
-Filenames are sanitized to a bare basename ending in .csv, so a connection
-can never write outside --outdir.
+Every filename is reduced to a bare basename and checked against an
+allowed extension before use, so a connection can never write outside the
+configured directories.
 
 Dependency-free: standard library only.
 """
 import argparse
 import hmac
 import os
+import re
 import socket
 import ssl
 import threading
@@ -34,6 +39,72 @@ def safe_filename(name):
     return name
 
 
+BLOB_SUFFIXES = (".fit.gz", ".fits.gz", ".fit", ".fits")
+BLOB_DATE = re.compile(r"_(\d{8})_\d{6}_\d{2}\.")
+
+
+def safe_blob_name(name):
+    """Sanitize a spectrogram filename the same way as a CSV name.
+
+    Same reasoning as safe_filename: the name arrives over the network, so
+    it is reduced to a bare basename and must carry a known extension
+    before anything touches the filesystem.
+    """
+    name = os.path.basename(name.strip())
+    if not name or name in (".", ".."):
+        return None
+    if not name.lower().endswith(BLOB_SUFFIXES):
+        return None
+    return name
+
+
+def blob_subdir(name):
+    """CALLISTO files embed their date; file them into per-day folders so
+    the store stays browsable instead of becoming one huge directory."""
+    match = BLOB_DATE.search(name)
+    if not match:
+        return "undated"
+    stamp = match.group(1)
+    return f"{stamp[0:4]}-{stamp[4:6]}-{stamp[6:8]}"
+
+
+def read_exactly(stream, length):
+    """Read exactly `length` bytes, or fail. Anything less means the
+    connection died mid-payload and the stream can't be trusted."""
+    chunks = []
+    remaining = length
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            raise ConnectionError("connection closed mid-transfer")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def write_atomic(out_path, content):
+    """Write to a temp file, then rename over the target.
+
+    The rename is what makes it atomic -- a reader either sees the old
+    file or the new one, never a half-written mixture. On Windows the
+    rename can transiently fail if something else (antivirus, indexing, a
+    file open in an editor) holds the target, so it is retried; there is
+    no application-level ack for a sender to fall back on.
+    """
+    tmp_path = out_path + ".tmp"
+    with open(tmp_path, "wb") as out:
+        out.write(content)
+
+    for attempt in range(5):
+        try:
+            os.replace(tmp_path, out_path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.2)
+
+
 def handle_client(raw_conn, addr, cfg, ctx, lock):
     peer = f"{addr[0]}:{addr[1]}"
     try:
@@ -45,6 +116,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
 
     f = conn.makefile("rwb")
     row_count = 0
+    blob_count = 0
     file_count = 0
     try:
         line = f.readline()
@@ -85,48 +157,40 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                         out.write(text + "\n")
                 row_count += 1
 
-            elif verb == b"FILE":
+            elif verb in (b"FILE", b"BLOB"):
                 try:
                     length = int(rest)
                     if length < 0:
                         raise ValueError
                 except ValueError:
-                    log(f"{peer}: bad FILE length {rest!r}, closing")
+                    log(f"{peer}: bad {verb.decode()} length {rest!r}, closing")
                     break
-                remaining = length
-                chunks = []
-                while remaining > 0:
-                    chunk = f.read(remaining)
-                    if not chunk:
-                        raise ConnectionError("connection closed mid-file-transfer")
-                    chunks.append(chunk)
-                    remaining -= len(chunk)
-                content = b"".join(chunks)
 
-                name = safe_filename(raw_name.decode("utf-8", errors="replace"))
-                if not name:
-                    log(f"{peer}: rejected unsafe filename in FILE message, discarded {length} bytes")
-                    continue
-                out_path = os.path.join(cfg["outdir"], name)
-                tmp_path = out_path + ".tmp"
+                # The payload must be drained even if the name turns out to
+                # be unusable, otherwise the stream desynchronises and every
+                # message after this one is garbage.
+                content = read_exactly(f, length)
+                raw = raw_name.decode("utf-8", errors="replace")
+
+                if verb == b"FILE":
+                    name = safe_filename(raw)
+                    if not name:
+                        log(f"{peer}: rejected unsafe filename in FILE, discarded {length} bytes")
+                        continue
+                    out_path = os.path.join(cfg["outdir"], name)
+                    file_count += 1
+                else:
+                    name = safe_blob_name(raw)
+                    if not name or not cfg.get("blobdir"):
+                        log(f"{peer}: rejected BLOB {raw!r}, discarded {length} bytes")
+                        continue
+                    day_dir = os.path.join(cfg["blobdir"], blob_subdir(name))
+                    os.makedirs(day_dir, exist_ok=True)
+                    out_path = os.path.join(day_dir, name)
+                    blob_count += 1
+
                 with lock:
-                    with open(tmp_path, "wb") as out:
-                        out.write(content)
-                    # os.replace can transiently fail on Windows with
-                    # "Access is denied" if something else (antivirus,
-                    # indexing) briefly has the target open without
-                    # FILE_SHARE_DELETE -- retry a few times before giving
-                    # up, since there's no application-level ack/retry for
-                    # a sender to fall back on if this silently fails.
-                    for attempt in range(5):
-                        try:
-                            os.replace(tmp_path, out_path)
-                            break
-                        except PermissionError:
-                            if attempt == 4:
-                                raise
-                            time.sleep(0.2)
-                file_count += 1
+                    write_atomic(out_path, content)
 
             else:
                 log(f"{peer}: unknown verb {verb!r}, closing")
@@ -136,7 +200,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
         log(f"{peer}: connection error: {e}")
     finally:
         conn.close()
-        log(f"{peer}: disconnected ({row_count} rows, {file_count} full-file replacements)")
+        log(f"{peer}: disconnected ({row_count} rows, {file_count} file replacements, {blob_count} spectrograms)")
 
 
 def main():
@@ -147,12 +211,15 @@ def main():
     ap.add_argument("--key", default="key.pem")
     ap.add_argument("--token-file", default="token.txt")
     ap.add_argument("--outdir", default="incoming_logs")
+    ap.add_argument("--blobdir", default=None, help="where to store incoming spectrograms")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
+    if args.blobdir:
+        os.makedirs(args.blobdir, exist_ok=True)
     with open(args.token_file) as f:
         token = f.read().strip()
-    cfg = {"token": token, "outdir": args.outdir}
+    cfg = {"token": token, "outdir": args.outdir, "blobdir": args.blobdir}
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)

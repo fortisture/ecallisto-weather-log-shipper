@@ -545,7 +545,9 @@ header {
 .chart-body {
   padding: 20px 20px 10px;
 
-  height: 260px;
+  /* Taller than the data strictly needs: the legend sits inside the chart
+   * area, and squeezing it against the axis makes both harder to read. */
+  height: 300px;
 
   position: relative;
 }
@@ -828,21 +830,95 @@ footer.page-footer {
 .spectrogram-body canvas {
   display: block;
 
-  width: 100%;
-
-  /* The pixel buffer is ~3600x200; at height:auto that renders as an
-   * unreadable sliver, so the display height is set independently of
-   * the data aspect ratio. */
-  height: 340px;
-
-  /* Nearest-neighbour: these are measurements, and smoothing would
-   * invent structure between real samples. */
-  image-rendering: pixelated;
+  /* Size is set in JS: the canvas now contains the axes, labels and
+   * colorbar as well as the image, and is drawn at device pixel ratio
+   * so the text stays crisp. */
+  max-width: 100%;
 
   border: 1px solid var(--line);
   border-radius: 2px;
 
-  background: #000;
+  background: var(--panel);
+}
+
+/* ---------- FITS: year / month selectors ---------- */
+
+.period-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.period-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+
+  color: var(--text-faint);
+
+  min-width: 42px;
+}
+
+.period-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.period-btn {
+  appearance: none;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  padding: 6px 12px;
+
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+
+  font-family: var(--font-mono);
+  text-align: left;
+
+  cursor: pointer;
+
+  transition: border-color 0.15s ease;
+}
+
+.period-btn .p-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.period-btn .p-meta {
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+.period-btn:hover:not(:disabled) {
+  border-color: var(--signal-dim);
+}
+
+.period-btn.is-active {
+  background: var(--signal-dim);
+  border-color: var(--signal);
+}
+
+.period-btn.is-active .p-label,
+.period-btn.is-active .p-meta {
+  color: #04120F;
+}
+
+.period-btn.is-off {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .spectrogram-note {

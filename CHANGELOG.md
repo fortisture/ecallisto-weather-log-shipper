@@ -5,6 +5,39 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [3.1.0] - 2026-08-13
+
+### Added
+- **Spectrograms now ship from the Pi.** New `BLOB` wire message carries
+  binary files over the same authenticated TLS connection as the weather
+  rows; the receiver files them into per-day folders taken from the
+  filename's embedded date. The server is now the single store for
+  everything the station produces.
+- **6-hour failsafe on both sides.** The server rebuilds all derived files
+  from disk on a timer regardless of change detection (and immediately if
+  an output file has gone missing), and sweeps up `.tmp`/`.part` debris
+  from interrupted writes. The Pi periodically clears its delivery state so
+  a server-side loss re-sends automatically. Both intervals are
+  configurable; `0` disables.
+- **Fully annotated spectrogram plots**: frequency axis (MHz), time axis
+  (UT clock), title, and a labelled colorbar with units — drawn into the
+  canvas at device pixel ratio so exported images are self-describing.
+- **Year → month → day navigation** for the FITS archive, each level
+  showing how many recording days it contains.
+- **Four background-subtraction modes**: per-channel mean (the published
+  e-Callisto standard, now the default), per-channel median (robust),
+  global constant, and none.
+- **CALLISTO palette** as the default, alongside the perceptually-ordered
+  Inferno/Viridis/Grayscale ramps.
+- **Median reference line** on every weather chart — dashed and neutral
+  (an annotation, not a fifth series), labelled in the legend with its
+  value.
+
+### Fixed
+- A rejected `FILE`/`BLOB` filename left its payload unread, desynchronising
+  the connection so every subsequent message parsed as garbage.
+- Spectrogram title overlapped the processing label at normal widths.
+
 ## [3.0.0] - 2026-08-13
 
 ### Added

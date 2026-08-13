@@ -411,6 +411,20 @@
      * more ink into the same pixels. */
     const MAX_POINTS = 600;
 
+    /* The median reference line is an annotation, not a fifth series, so
+     * it is deliberately achromatic and dashed. Giving it a hue would
+     * make it compete with the data line it sits on top of -- and any hue
+     * close enough to be tasteful is too close to tell apart from the
+     * series colour under colour-blind simulation. */
+    const MEDIAN_LINE = "#8FA0B3";
+
+    const SERIES_LABELS = {
+      temp_c: "Temperature",
+      dew_point_c: "Dew point",
+      humidity_pct: "Relative humidity",
+      pressure_hpa: "Pressure"
+    };
+
     const charts = {};
     let allReadings = [];
     let latestReading = null;
@@ -715,7 +729,22 @@
         interaction: { mode: "index", intersect: false },
 
         plugins: {
-          legend: { display: false },
+          /* Two lines are drawn, so the legend is not optional -- an
+           * unlabelled dashed line is a question mark. It also names the
+           * median's value, so the number is readable without hovering. */
+          legend: {
+            display: true,
+            position: "bottom",
+            align: "start",
+            labels: {
+              boxWidth: 18,
+              boxHeight: 1,
+              padding: 12,
+              color: "#6B7A8B",
+              font: { family: "IBM Plex Mono", size: 10 },
+              usePointStyle: false
+            }
+          },
 
           tooltip: {
             backgroundColor: "#151D27",
@@ -728,10 +757,13 @@
             titleFont: { family: "IBM Plex Mono", size: 10 },
             bodyFont: { family: "IBM Plex Mono", size: 12 },
             callbacks: {
-              label: item =>
-                item.parsed.y === null
-                  ? "—"
-                  : item.parsed.y.toFixed(decimals) + " " + unit
+              label: item => {
+                if (item.parsed.y === null) {
+                  return item.datasetIndex === 0 ? "no data" : "";
+                }
+                const value = item.parsed.y.toFixed(decimals) + " " + unit;
+                return item.datasetIndex === 0 ? value : "median " + value;
+              }
             }
           }
         },
@@ -763,6 +795,18 @@
     }
 
 
+    function medianOf(values) {
+      const clean = values.filter(v => v !== null && v !== undefined).sort((a, b) => a - b);
+      if (!clean.length) {
+        return null;
+      }
+      const mid = Math.floor(clean.length / 2);
+      return clean.length % 2
+        ? clean[mid]
+        : (clean[mid - 1] + clean[mid]) / 2;
+    }
+
+
     function buildChart(canvasId, field, spec, labels, values) {
       const canvas = element(canvasId);
       if (!canvas) {
@@ -771,9 +815,19 @@
 
       const ctx = canvas.getContext("2d");
 
+      /* Median, not mean: a few extreme readings (a hot afternoon, a
+       * pressure crash) drag a mean away from what the period was
+       * actually like. The median says "half the time it was above
+       * this", which is what you want from a reference line. */
+      const median = medianOf(values);
+      const medianSeries = values.map(() => median);
+
       if (charts[canvasId]) {
         charts[canvasId].data.labels = labels;
         charts[canvasId].data.datasets[0].data = values;
+        charts[canvasId].data.datasets[1].data = medianSeries;
+        charts[canvasId].data.datasets[1].label =
+          "Median " + (median === null ? "—" : median.toFixed(spec.decimals) + " " + spec.unit);
         charts[canvasId].update("none");
         return;
       }
@@ -787,7 +841,7 @@
         data: {
           labels: labels,
           datasets: [{
-            label: field,
+            label: SERIES_LABELS[field] || field,
             data: values,
             borderColor: spec.color,
             backgroundColor: gradient,
@@ -799,7 +853,23 @@
             pointHoverBorderWidth: 2,
             fill: true,
             tension: 0.25,
-            spanGaps: false
+            spanGaps: false,
+            order: 1
+          },
+          {
+            label: "Median " +
+              (median === null ? "—" : median.toFixed(spec.decimals) + " " + spec.unit),
+            data: medianSeries,
+            borderColor: MEDIAN_LINE,
+            borderWidth: 1,
+            borderDash: [5, 4],
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: false,
+            tension: 0,
+            /* Drawn under the data line: the measurements are the
+             * subject, the reference is context. */
+            order: 2
           }]
         },
         options: chartOptions(spec.unit, spec.decimals)

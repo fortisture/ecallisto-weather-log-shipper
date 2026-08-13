@@ -125,6 +125,30 @@ file's contents. Change one character anywhere and the fingerprint changes
 completely. The sender remembers the fingerprint of exactly what it has
 already sent, and each second it recalculates and compares.
 
+Here is the actual comparison, from `pi/sender.py`:
+
+```python
+prev = state.get(name, {"length": 0, "hash": EMPTY_HASH})
+prev_len  = prev["length"]
+prev_hash = prev["hash"]
+
+# 1. Nothing changed at all.
+if len(data) == prev_len and hashlib.sha256(data).hexdigest() == prev_hash:
+    continue
+
+# 2. The file still STARTS with what we already sent -> pure append.
+if len(data) >= prev_len and hashlib.sha256(data[:prev_len]).hexdigest() == prev_hash:
+    ...send only the new rows...
+else:
+    # 3. Something we already sent has changed -> resend the whole file.
+    ...
+```
+
+The key line is `data[:prev_len]` — "the first N bytes, where N is how much
+I'd already sent." If hashing *that slice* still matches, nothing old
+changed and only the tail is new. If it doesn't match, something was edited
+underneath us.
+
 That comparison has three possible outcomes:
 
 | What it finds | What it means | What it does |
@@ -156,6 +180,24 @@ instantaneous at the operating-system level — there is no moment where the
 file is half-written. Without this, losing power mid-write would leave a
 corrupted record and the sender wouldn't know where it was.
 
+```python
+def save_state(path, state):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, path)     # <- the atomic step
+```
+
+And the save-after-every-row loop it protects:
+
+```python
+if line:
+    sock.sendall(f"ROW\t{name}\t{text}\n".encode("utf-8"))
+offset = f.tell()
+state[name] = {"length": pos, "hash": ...}
+save_state(cfg["state_file"], state)   # every row, not every batch
+```
+
 ### When the network breaks
 
 It reconnects, with **exponential backoff**: wait 1 second, then 2, 4, 8,
@@ -177,14 +219,52 @@ It listens on port 9443 and understands exactly two kinds of message:
 Each incoming connection is handled on its own **thread** (an independent
 line of execution), so a slow or stuck connection can't block others.
 
+There is a third: **`BLOB`** — a binary file (a CALLISTO spectrogram),
+stored under the FITS folder. Same shape as `FILE`, but the content is not
+text and it gets filed into a per-day folder taken from the filename:
+
+```python
+BLOB_DATE = re.compile(r"_(\d{8})_\d{6}_\d{2}\.")
+
+def blob_subdir(name):
+    match = BLOB_DATE.search(name)
+    if not match:
+        return "undated"
+    stamp = match.group(1)                       # e.g. "20250909"
+    return f"{stamp[0:4]}-{stamp[4:6]}-{stamp[6:8]}"   # -> "2025-09-09"
+```
+
+This is what makes the PC a real database for the station: **both** the
+weather rows and the spectrograms arrive over the same authenticated
+connection, so the Pi's SD card stops being the only copy of anything.
+
 ### Two things it does carefully
 
 **It doesn't trust the filename it's given.** A filename is data arriving
 over a network, and data can be malicious. Something could send
 `../../Windows/System32/something.csv` and try to make the receiver write
 outside its folder. So the receiver strips the filename down to its bare
-last component and requires it to end in `.csv`. Anything else is rejected
-and logged.
+last component and requires it to end in an expected extension. Anything
+else is rejected and logged.
+
+```python
+def safe_filename(name):
+    name = os.path.basename(name.strip())        # kills any ../ path parts
+    if not name or name in (".", "..") or not name.endswith(".csv"):
+        return None
+    return name
+```
+
+One subtlety worth knowing: when a name is rejected, the payload bytes must
+**still be read off the connection**. Skipping them would leave the unread
+bytes sitting in the stream, and every message after that one would be
+parsed from the wrong place:
+
+```python
+# Drain the payload even if the name turns out to be unusable, otherwise
+# the stream desynchronises and every message after this one is garbage.
+content = read_exactly(f, length)
+```
 
 **It replaces files atomically.** A `FILE` message writes to a temporary
 file, then renames it into place — so the website can never catch a file
@@ -222,6 +302,21 @@ it to the expected value. Not "is this signed by someone reputable" — but
 "is this the *exact* certificate I was told to expect." One byte different
 and the Pi refuses to send anything.
 
+```python
+der = sock.getpeercert(binary_form=True)     # the server's actual certificate
+fp  = hashlib.sha256(der).hexdigest()        # its fingerprint
+expected = cfg["fingerprint"].replace(":", "").lower()
+
+if fp != expected:
+    sock.close()
+    raise ssl.SSLCertVerificationError(
+        f"certificate fingerprint mismatch: got {fp}, expected {expected}"
+    )
+```
+
+Note this happens *before* the token is sent — so a fake server never even
+gets to see the shared secret.
+
 This defeats an attacker who redirects traffic to their own machine: they
 can present a valid-looking certificate, but not *your* certificate.
 
@@ -237,6 +332,15 @@ with the right letter takes microscopically longer to reject. Measure
 enough attempts and you can extract the token one character at a time. This
 is a **timing attack**, and `compare_digest` defeats it by always taking
 the same amount of time.
+
+```python
+token = line[len(b"AUTH "):].strip().decode("utf-8", errors="replace")
+
+if not hmac.compare_digest(token, cfg["token"]):   # NOT  token == cfg["token"]
+    conn.sendall(b"DENY\n")
+    log(f"{peer}: bad token, closing")
+    return
+```
 
 ### What it deliberately does not do
 
@@ -271,10 +375,72 @@ files hundreds of times an hour for no reason.
 The watcher is wrapped in a catch-all error handler. If something
 unexpected breaks in it, it logs the error and keeps going, rather than
 silently dying and leaving you with a website that quietly stops updating —
-the worst kind of failure, because everything *looks* fine.
+the worst kind of failure, because everything *looks* fine. It also throws
+away its cached fingerprints so the next pass rebuilds from scratch:
+
+```python
+except Exception as e:
+    log(f"watcher error: {e!r} -- forcing a rebuild next pass")
+    last_weather = None
+    last_fits = None
+```
 
 The web server also maps URLs starting `/fits/` onto the local FITS folder,
 with the same path-traversal protection as the receiver.
+
+### The 6-hour failsafe
+
+Change-detection has a blind spot. It only rebuilds when the *source*
+changes — so if a derived file gets deleted, truncated, or left half-written
+by a crash, nothing changed upstream and nothing gets fixed. Worse, "nothing
+changed" is exactly what a silently-stuck pipeline looks like.
+
+So both sides run a timed sweep that ignores change detection entirely.
+
+**On the server** (`server.py`), every 6 hours everything is rebuilt from
+whatever is actually on disk:
+
+```python
+forced = next_failsafe is not None and time.time() >= next_failsafe
+if forced:
+    log(f"failsafe sweep ({failsafe_hours:g}h): rebuilding everything from disk")
+    next_failsafe = time.time() + failsafe_hours * 3600
+
+missing = not os.path.exists(os.path.join(api_dir, "weather", "history.json"))
+
+if forced or missing or digest != last_weather:
+    ...rebuild...
+```
+
+Note `missing` — if the output file has vanished, it rebuilds immediately
+rather than waiting for the timer.
+
+It also sweeps up debris from interrupted writes:
+
+```python
+def clean_stale_temp_files(*dirs, max_age=3600):
+    """A crash between "write temp" and "rename into place" leaves debris
+    that nothing will ever complete."""
+    cutoff = time.time() - max_age
+    ...remove any *.tmp / *.part older than an hour...
+```
+
+**On the Pi** (`pi/sender.py`), every 6 hours it forgets what it thinks it
+already delivered, which forces a full re-send:
+
+```python
+def resync_all(cfg, state):
+    state.clear()
+    save_state(cfg["state_file"], state)
+    log("failsafe resync: delivery state cleared, resending everything")
+```
+
+That sounds drastic, but it is safe *by construction*: rows are matched by
+content hash and offset, and blobs replace whole files — so re-sending
+something that already arrived changes nothing. This is what fixes the
+backlog if the server was rebuilt, restored from a backup, or lost files.
+The Pi has no way to *detect* that happened; periodically assuming it might
+have is cheaper than trying to find out.
 
 ---
 
@@ -332,8 +498,23 @@ finds a gap more than 3× that, it inserts a marker row with no values. The
 chart draws a **break** there instead of a line. Downtime looks like
 downtime.
 
-The threshold is relative to the file's own rhythm, so it works whether the
-station logs every 10 seconds or every hour.
+```python
+deltas = sorted(times[i + 1] - times[i] for i in range(len(times) - 1))
+median = deltas[len(deltas) // 2]          # the series' own normal cadence
+threshold = median * gap_factor            # gap_factor = 3.0
+
+for i, reading in enumerate(readings):
+    out.append(reading)
+    if i + 1 < len(readings) and (times[i + 1] - times[i]) > threshold:
+        marker = {"timestamp": ..., "gap": True}
+        marker.update({key: None for key in value_keys})   # all values null
+        out.append(marker)
+```
+
+The threshold is relative to the file's own rhythm (that `median` line), so
+it works whether the station logs every 10 seconds or every hour. On the
+browser side, `spanGaps: false` is what turns those nulls into an actual
+visual break rather than a line drawn straight through them.
 
 ---
 
@@ -370,6 +551,36 @@ local time with the zone name (CEST), so "07:50" is never ambiguous. Plus
 "UPDATED 11S AGO", ticking every second — so a frozen page is obvious.
 Without it, a dashboard that stopped updating looks exactly like a
 dashboard where nothing is happening.
+
+### The median line
+
+Each chart carries a dashed reference line at the **median** of whatever
+period is selected — "half the time it was above this."
+
+Median, not mean, deliberately: a few extreme readings (one very hot
+afternoon, a pressure crash during a front) drag a mean away from what the
+period was actually like. The median ignores them.
+
+```python
+function medianOf(values) {
+  const clean = values.filter(v => v !== null && v !== undefined)
+                      .sort((a, b) => a - b);
+  if (!clean.length) return null;
+  const mid = Math.floor(clean.length / 2);
+  return clean.length % 2 ? clean[mid]
+                          : (clean[mid - 1] + clean[mid]) / 2;
+}
+```
+
+It is drawn **grey and dashed**, not in a colour of its own. That is a
+deliberate call: it is an annotation, not a fifth data series. Any hue
+close enough to look tasteful beside the data line turned out to be too
+close to distinguish under colour-blind simulation — violet against the
+blue humidity line measured ΔE 9.8, well under the 15 minimum. Grey plus a
+dash pattern is unambiguous for everyone.
+
+It is also **labelled in the legend with its value** (`Median 28.0 °C`),
+because an unexplained dashed line across a chart is just a question.
 
 ### The colours were verified, not chosen by eye
 
@@ -422,11 +633,44 @@ Each frequency channel has its own baseline: different antenna gain,
 different local interference. Raw, the image is horizontal stripes and you
 cannot see anything real.
 
-So for each frequency row, the viewer calculates the **median** value and
-subtracts it. Median, not average, deliberately — a bright burst would drag
-an average upward and partly erase itself. A median ignores outliers, which
-is exactly what you want when the outliers are the signal you're looking
-for.
+The published e-Callisto method is to subtract **a constant background per
+frequency channel, computed as the mean over time**, then clip. That is the
+default here, so what you see matches the standard product. Four modes are
+offered:
+
+```javascript
+function computeBaseline(data, width, height, mode) {
+  const baseline = new Float32Array(height);
+
+  if (mode === "none") return baseline;                 // raw digits
+
+  if (mode === "global") {                              // one number for all
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    baseline.fill(sum / data.length);
+    return baseline;
+  }
+
+  if (mode === "channel-median") { ...per-row median... }
+
+  // Default: per-channel MEAN -- the e-Callisto standard.
+  for (let y = 0; y < height; y++) {
+    let sum = 0;
+    for (let x = 0; x < width; x++) sum += data[y * width + x];
+    baseline[y] = sum / width;
+  }
+  return baseline;
+}
+```
+
+- **channel-mean** — the standard. Matches published quicklooks.
+- **channel-median** — robust variant. A long burst drags a *mean* upward
+  and so partially erases itself; a median ignores it. Better on a busy
+  file, but not the standard.
+- **global** — one number for the whole image. Preserves the real
+  differences *between* channels, so you can see which parts of the band
+  are noisy. Useless for spotting faint bursts.
+- **none** — raw receiver digits, stripes and all.
 
 ### Contrast scaling
 
@@ -439,10 +683,73 @@ The contrast slider applies a **gamma curve**, which brightens faint
 detail without blowing out bright features (a simple multiplier saturates
 everything instead).
 
-Colour palettes are **perceptually ordered**: brightness increases
-consistently with signal strength, so a brighter pixel always means a
-stronger signal. Rainbow palettes fail this and create features that aren't
-there.
+### The axes — what makes it a plot rather than a picture
+
+A coloured rectangle tells you nothing without labels. The canvas therefore
+reserves margins around the image and draws the chrome into them:
+
+```javascript
+const PLOT = {
+  left:   74,   // frequency axis + its title
+  right:  96,   // colorbar + its ticks
+  top:    40,   // plot title
+  bottom: 58,   // time axis + its title
+  barWidth: 16
+};
+```
+
+What ends up on screen:
+
+- **Vertical axis** — frequency in MHz, high at the top (the convention).
+- **Horizontal axis** — time as a UT clock, derived from `CRVAL1` (seconds
+  into the day) and `CDELT1` (0.25 s per column).
+- **Title** — instrument, date, start time.
+- **Colorbar** — the actual value scale, labelled `DIGITS ABOVE BACKGROUND`
+  (or just `DIGITS` when subtraction is off, because then the numbers mean
+  something different and mislabelling them would be worse than not
+  labelling them).
+- **A processing note** under the plot saying which background mode
+  produced the image, so an exported screenshot is self-describing.
+
+Tick values are rounded to human numbers rather than whatever the range
+happens to divide into:
+
+```javascript
+const candidates = [1, 2, 2.5, 5, 10].map(m => m * magnitude);
+const step = candidates.find(c => c >= rough) || ...;
+```
+
+"100, 200, 300" is readable. "94.6, 189.2, 283.8" is not.
+
+The whole thing is drawn at `devicePixelRatio` so the text is crisp on
+high-DPI screens, and redrawn on window resize — otherwise the labels
+stretch with the canvas and go blurry.
+
+### Palettes
+
+**CALLISTO** is the default: the dark-blue → cyan → green → yellow → red
+look these spectrograms are conventionally published in, because that is
+what this community reads fluently.
+
+It is worth knowing that this palette is *not* monotonic in brightness —
+mid-range greens can read as "brighter" than stronger signals further up
+the scale. The other three (**Inferno**, **Viridis**, **Grayscale**) are
+perceptually ordered: brightness rises consistently with signal, so a
+brighter pixel always means a stronger signal. If you are judging relative
+intensity rather than pattern-matching against published plots, use one of
+those.
+
+I could not retrieve the official quicklook PNGs to colour-match exactly,
+so the CALLISTO ramp is modelled on published CALLISTO figures rather than
+sampled from the official renderer.
+
+### Browsing years
+
+The archive spans years, so a flat list of days would be thousands of
+buttons — and "09-07" alone doesn't tell you which year. Navigation is
+therefore **year → month → day**, and each level shows how many recording
+days it contains, so empty stretches are visible before you click into
+them.
 
 ### The frequency axis — a real correctness trap
 
@@ -550,6 +857,16 @@ python rag-web-ui/fetch_visnjan_fits.py --days 3
 | Percentile contrast scaling | One interference spike would otherwise flatten the whole image |
 | Read frequencies from the table, not the header | The header value is wrong by a factor of two |
 | Data excluded from git | Large, reproducible, and not source code |
+| Spectrograms shipped over the same connection | One authenticated channel, one store; the Pi's SD card stops being the only copy |
+| Blobs sent whole, never incrementally | A FITS file is written once and never appended to |
+| Skip blobs modified in the last 5 seconds | Avoids shipping a file the instrument is still writing |
+| Failsafe resync every 6 hours | Change-detection can't see a loss on the *other* side |
+| Re-sending is safe rather than tracked | Cheaper to re-send blindly than to build an acknowledgement protocol |
+| Median (not mean) reference line | A few extremes drag a mean away from the typical value |
+| Grey dashed median line | It's an annotation, not a series; and every tasteful hue failed CVD separation |
+| Per-channel **mean** default subtraction | It's the published e-Callisto standard, so output matches the reference product |
+| Axes drawn into the canvas | An exported image stays self-describing |
+| Year → month → day navigation | A flat day list across years is thousands of buttons |
 
 ---
 
@@ -585,6 +902,15 @@ Real bugs, found by testing rather than reading:
 8. **Frequency axis was wrong by ~2×.** Trusted the header instead of the
    frequency table.
 
+9. **Title and processing label overlapped** on the spectrogram at normal
+   widths. The note moved below the plot; a title must never be the thing
+   that gets overwritten.
+
+10. **A rejected filename would have desynchronised the stream.** When a
+    `FILE`/`BLOB` name failed validation, the payload bytes still had to be
+    read off the connection — otherwise every following message would be
+    parsed starting from the middle of the discarded file.
+
 ---
 
 ## 15. Things you should know that might bite you
@@ -611,3 +937,20 @@ Real bugs, found by testing rather than reading:
 
 - **A file open in an editor may block replacement.** The retry covers a
   brief lock; a file left open indefinitely will still fail.
+
+- **The 6-hour resync re-sends everything.** That is the point, and it is
+  safe — but on a slow link with a large FITS archive it is real traffic.
+  Turn it down with `--resync-hours` on the Pi or `--failsafe-hours` on the
+  server; `0` disables it.
+
+- **The Pi does not yet ship FITS by default.** The sender only looks for
+  spectrograms if `fits_dir` is set in its `config.json`. Without it, the
+  BLOB path is simply unused and only weather is shipped.
+
+- **The CALLISTO palette is not brightness-ordered.** It matches the
+  published convention, which is why it is the default — but for judging
+  relative intensity, switch to Inferno or Viridis.
+
+- **The station's frequency coverage is 45–404 MHz**, not the 45–870 MHz
+  the network as a whole spans. That is what this receiver's own frequency
+  table reports.

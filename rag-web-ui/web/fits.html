@@ -67,6 +67,17 @@
       </div>
 
       <div class="calendar-body">
+
+        <div class="period-row">
+          <span class="period-label">Year</span>
+          <div class="period-buttons" id="year-buttons"></div>
+        </div>
+
+        <div class="period-row">
+          <span class="period-label">Month</span>
+          <div class="period-buttons" id="month-buttons"></div>
+        </div>
+
         <div class="calendar-strip" id="calendar-strip"></div>
 
         <div class="calendar-legend">
@@ -110,6 +121,7 @@
         <label class="control">
           <span>Palette</span>
           <select id="palette-select">
+            <option value="callisto">CALLISTO</option>
             <option value="inferno">Inferno</option>
             <option value="viridis">Viridis</option>
             <option value="gray">Grayscale</option>
@@ -119,8 +131,10 @@
         <label class="control">
           <span>Background subtraction</span>
           <select id="bgsub-select">
-            <option value="channel">Per channel (default)</option>
-            <option value="none">None (raw digits)</option>
+            <option value="channel-mean">Per channel · mean (standard)</option>
+            <option value="channel-median">Per channel · median (robust)</option>
+            <option value="global">Global constant</option>
+            <option value="none">None · raw digits</option>
           </select>
         </label>
 
@@ -226,27 +240,135 @@
     }
 
 
+    const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                         "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+    let selectedYear = null;
+    let selectedMonth = null;
+
+
+    /* The archive spans years, so a single flat strip of days would be
+     * thousands of buttons. Year -> month -> day keeps it navigable and
+     * makes the year unambiguous (09-07 alone doesn't say which year). */
+    function calendarByPeriod() {
+      const byYear = {};
+
+      (indexData.calendar || []).forEach(day => {
+        const [year, month] = day.date.split("-");
+        byYear[year] = byYear[year] || {};
+        byYear[year][month] = byYear[year][month] || [];
+        byYear[year][month].push(day);
+      });
+
+      return byYear;
+    }
+
+
     function renderCalendar() {
       const strip = element("calendar-strip");
-      strip.innerHTML = "";
-
       const calendar = indexData.calendar || [];
 
       if (!calendar.length) {
+        element("year-buttons").innerHTML = "";
+        element("month-buttons").innerHTML = "";
         strip.innerHTML =
           '<span class="empty-note">No spectrograms stored locally yet. ' +
           'Run <code>python rag-web-ui/fetch_visnjan_fits.py</code>.</span>';
         return;
       }
 
-      calendar.forEach(day => {
+      const periods = calendarByPeriod();
+      const years = Object.keys(periods).sort();
+
+      if (!selectedYear || !periods[selectedYear]) {
+        selectedYear = years[years.length - 1];
+      }
+
+      renderPeriodButtons("year-buttons", years, selectedYear, year => {
+        const recorded = countRecorded(Object.values(periods[year]).flat());
+        return { label: year, meta: recorded + " days", enabled: recorded > 0 };
+      }, year => {
+        selectedYear = year;
+        selectedMonth = null;
+        renderCalendar();
+      });
+
+      const months = Object.keys(periods[selectedYear]).sort();
+      if (!selectedMonth || !periods[selectedYear][selectedMonth]) {
+        const withData = months.filter(m => countRecorded(periods[selectedYear][m]) > 0);
+        selectedMonth = withData.length ? withData[withData.length - 1] : months[months.length - 1];
+      }
+
+      renderPeriodButtons("month-buttons", months, selectedMonth, month => {
+        const recorded = countRecorded(periods[selectedYear][month]);
+        return {
+          label: MONTH_NAMES[Number(month) - 1] || month,
+          meta: recorded + " days",
+          enabled: recorded > 0
+        };
+      }, month => {
+        selectedMonth = month;
+        renderCalendar();
+      });
+
+      renderDays(periods[selectedYear][selectedMonth] || []);
+
+      const totals = indexData.totals || {};
+      setText(
+        "calendar-tag",
+        (totals.days_with_data || 0) + " OF " + (totals.days_in_span || 0) + " DAYS RECORDED"
+      );
+    }
+
+
+    function countRecorded(days) {
+      return days.filter(day => day.available).length;
+    }
+
+
+    function renderPeriodButtons(containerId, keys, active, describe, onSelect) {
+      const container = element(containerId);
+      container.innerHTML = "";
+
+      keys.forEach(key => {
+        const { label, meta, enabled } = describe(key);
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "period-btn" +
+          (key === active ? " is-active" : "") +
+          (enabled ? "" : " is-off");
+        button.disabled = !enabled;
+        button.innerHTML =
+          '<span class="p-label">' + label + "</span>" +
+          '<span class="p-meta">' + meta + "</span>";
+
+        if (enabled) {
+          button.addEventListener("click", () => onSelect(key));
+        }
+        container.appendChild(button);
+      });
+    }
+
+
+    function renderDays(days) {
+      const strip = element("calendar-strip");
+      strip.innerHTML = "";
+
+      if (!days.length) {
+        strip.innerHTML = '<span class="empty-note">No days in this month.</span>';
+        return;
+      }
+
+      days.forEach(day => {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "day-btn" + (day.available ? " is-on" : " is-off");
+        button.dataset.date = day.date;
         button.disabled = !day.available;
 
         button.innerHTML =
-          '<span class="day-date">' + day.date.slice(5) + "</span>" +
+          '<span class="day-date">' + day.date.slice(8) + "</span>" +
           '<span class="day-meta">' +
           (day.available ? day.count + " sweeps" : "no data") +
           "</span>";
@@ -262,11 +384,12 @@
         strip.appendChild(button);
       });
 
-      const totals = indexData.totals || {};
-      setText(
-        "calendar-tag",
-        (totals.days_with_data || 0) + " OF " + (totals.days_in_span || 0) + " DAYS RECORDED"
-      );
+      /* Keep the currently-loaded day highlighted when the month is
+       * re-rendered, so the selection doesn't visually disappear. */
+      if (selectedDate) {
+        const current = strip.querySelector(`[data-date="${selectedDate}"]`);
+        if (current) current.classList.add("is-active");
+      }
     }
 
 
@@ -274,10 +397,7 @@
       selectedDate = dateKey;
 
       document.querySelectorAll(".day-btn").forEach(button => {
-        button.classList.toggle(
-          "is-active",
-          button.querySelector(".day-date").textContent === dateKey.slice(5)
-        );
+        button.classList.toggle("is-active", button.dataset.date === dateKey);
       });
 
       const files = (indexData.days || {})[dateKey] || [];
@@ -468,8 +588,19 @@
     // ============================================================
 
     const PALETTES = {
-      /* Perceptually-ordered ramps: brightness rises monotonically, so
-       * a brighter pixel always means a stronger signal. */
+      /* The look published CALLISTO spectrograms are conventionally shown
+       * in: dark blue background rising through cyan/green to yellow and
+       * red for strong emission. Kept because it is the convention this
+       * community reads fluently -- but note it is NOT monotonic in
+       * brightness, so mid-range greens can read as "brighter" than they
+       * are. The ramps below it are the honest ones. */
+      callisto: [
+        [0, 0, 40], [0, 10, 96], [0, 60, 160], [0, 130, 190],
+        [0, 180, 170], [60, 205, 110], [150, 220, 60], [225, 220, 30],
+        [250, 160, 20], [235, 90, 20], [200, 20, 20], [255, 240, 240]
+      ],
+      /* Perceptually-ordered ramps: brightness rises monotonically, so a
+       * brighter pixel always means a stronger signal. */
       inferno: [
         [0, 0, 4], [22, 11, 57], [66, 10, 104], [106, 23, 110],
         [147, 38, 103], [188, 55, 84], [221, 81, 58], [243, 120, 25],
@@ -481,6 +612,25 @@
         [180, 222, 44], [253, 231, 37]
       ],
       gray: [[0, 0, 0], [255, 255, 255]]
+    };
+
+    /* Plot chrome. The margins are where the axes, their labels and the
+     * colorbar live -- without them the image is just a coloured
+     * rectangle with no way to tell what any pixel means. */
+    const PLOT = {
+      left: 74,     // frequency axis + its title
+      right: 96,    // colorbar + its ticks
+      top: 40,      // plot title
+      bottom: 58,   // time axis + its title
+      barWidth: 16
+    };
+
+    const INK = {
+      text: "#C6D2DE",
+      muted: "#7C8B9C",
+      faint: "#3A4756",
+      axis: "#556373",
+      surface: "#0E141B"
     };
 
 
@@ -498,42 +648,89 @@
     }
 
 
-    function drawSpectrogram() {
-      if (!currentImage) return;
-
-      const { width, height, data } = currentImage;
-      const canvas = element("spectrogram");
-      const ctx = canvas.getContext("2d");
-
-      canvas.width = width;
-      canvas.height = height;
-
-      const ramp = PALETTES[element("palette-select").value] || PALETTES.inferno;
-      const subtract = element("bgsub-select").value === "channel";
-
-      /* Per-channel background: the median of each frequency row. A
-       * CALLISTO receiver's baseline differs wildly per channel (RFI,
-       * gain), so without this the image is horizontal stripes and any
-       * real burst is invisible. */
+    /* ---------------------------------------------------------------
+     * Background subtraction.
+     *
+     * Every CALLISTO channel sits on its own baseline (antenna gain,
+     * local interference), so raw data is horizontal stripes with the
+     * real signal buried. The published e-Callisto method subtracts a
+     * constant background per frequency channel, computed as the MEAN
+     * over time, then clips. That is the "channel-mean" mode and the
+     * default here, so what you see matches the standard product.
+     *
+     * "channel-median" is a robust variant: a long burst drags a mean
+     * upwards and partially erases itself, while a median ignores it.
+     * Better for a busy file, but it is not the standard.
+     *
+     * "global" subtracts one number for the whole image, preserving the
+     * real differences between channels -- useful for judging which
+     * parts of the band are noisy, useless for seeing faint bursts.
+     * --------------------------------------------------------------- */
+    function computeBaseline(data, width, height, mode) {
       const baseline = new Float32Array(height);
-      if (subtract) {
-        const scratch = new Uint8Array(width);
-        for (let y = 0; y < height; y++) {
-          scratch.set(data.subarray(y * width, y * width + width));
-          const sorted = Array.from(scratch).sort((a, b) => a - b);
-          baseline[y] = sorted[Math.floor(sorted.length / 2)];
-        }
+
+      if (mode === "none") {
+        return baseline;
       }
 
-      /* Scale to percentiles, not min/max. A handful of RFI spikes would
-       * otherwise stretch the range so far that the actual solar signal
+      if (mode === "global") {
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          sum += data[i];
+        }
+        baseline.fill(sum / data.length);
+        return baseline;
+      }
+
+      if (mode === "channel-median") {
+        const counts = new Int32Array(256);
+        for (let y = 0; y < height; y++) {
+          counts.fill(0);
+          for (let x = 0; x < width; x++) {
+            counts[data[y * width + x]]++;
+          }
+          let seen = 0;
+          for (let v = 0; v < 256; v++) {
+            seen += counts[v];
+            if (seen >= width / 2) {
+              baseline[y] = v;
+              break;
+            }
+          }
+        }
+        return baseline;
+      }
+
+      // Default: channel mean (the e-Callisto standard).
+      for (let y = 0; y < height; y++) {
+        let sum = 0;
+        for (let x = 0; x < width; x++) {
+          sum += data[y * width + x];
+        }
+        baseline[y] = sum / width;
+      }
+      return baseline;
+    }
+
+
+    /* Renders the image pixels into an offscreen canvas at native
+     * resolution. Kept separate from the axes so the plot can be scaled
+     * into its frame without the labels stretching with it. */
+    function renderImageLayer() {
+      const { width, height, data } = currentImage;
+      const ramp = PALETTES[element("palette-select").value] || PALETTES.callisto;
+      const mode = element("bgsub-select").value;
+      const baseline = computeBaseline(data, width, height, mode);
+
+      /* Scale to percentiles, not min/max: a handful of RFI spikes would
+       * otherwise stretch the range so far that the solar signal
        * collapses into one flat colour. Values are small integers, so a
        * histogram gives exact percentiles cheaply. */
       const OFFSET = 255;
       const histogram = new Int32Array(511);
 
       for (let y = 0; y < height; y++) {
-        const base = subtract ? baseline[y] : 0;
+        const base = baseline[y];
         for (let x = 0; x < width; x++) {
           const v = Math.round(data[y * width + x] - base) + OFFSET;
           if (v >= 0 && v < histogram.length) {
@@ -559,20 +756,24 @@
         hi = lo + 1;
       }
 
-      const image = ctx.createImageData(width, height);
+      const offscreen = document.createElement("canvas");
+      offscreen.width = width;
+      offscreen.height = height;
+      const octx = offscreen.getContext("2d");
+      const image = octx.createImageData(width, height);
+
       const span = hi - lo;
       /* Gamma, so the slider lifts faint structure without clipping the
        * bright end -- a linear multiplier just saturates the burst. */
       const gamma = 1 / contrast;
 
       for (let y = 0; y < height; y++) {
-        /* FITS row 0 is the bottom of the image; the canvas draws top
-         * down. CALLISTO's CDELT2 is negative (frequency decreases with
-         * row), so flipping here puts high frequency at the top, which
-         * is how e-Callisto quicklooks are conventionally shown. */
+        /* FITS row 0 is the bottom of the image and canvas draws top-down;
+         * CALLISTO's frequency also decreases with row index. Flipping
+         * here puts high frequency at the top, as CALLISTO plots are
+         * conventionally shown. */
         const sourceRow = height - 1 - y;
-
-        const base = subtract ? baseline[sourceRow] : 0;
+        const base = baseline[sourceRow];
 
         for (let x = 0; x < width; x++) {
           const value = data[sourceRow * width + x] - base;
@@ -586,8 +787,215 @@
         }
       }
 
-      ctx.putImageData(image, 0, 0);
+      octx.putImageData(image, 0, 0);
+      return { offscreen, lo, hi, ramp, mode };
     }
+
+
+    function niceTicks(min, max, count) {
+      /* Round tick steps (1, 2, 5, 10 ...) instead of whatever the data
+       * range divides into -- "50, 100, 150" is readable, "47.3, 94.6"
+       * is not. */
+      const span = max - min;
+      if (span <= 0) return [min];
+
+      const rough = span / count;
+      const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+      const candidates = [1, 2, 2.5, 5, 10].map(m => m * magnitude);
+      const step = candidates.find(c => c >= rough) || candidates[candidates.length - 1];
+
+      const ticks = [];
+      for (let v = Math.ceil(min / step) * step; v <= max + step * 0.001; v += step) {
+        ticks.push(v);
+      }
+      return ticks;
+    }
+
+
+    function secondsToClock(sec) {
+      const s = ((sec % 86400) + 86400) % 86400;
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    }
+
+
+    function drawSpectrogram() {
+      if (!currentImage) return;
+
+      const { width, height, header, frequencies } = currentImage;
+      const { offscreen, lo, hi, ramp, mode } = renderImageLayer();
+
+      const canvas = element("spectrogram");
+      const cssWidth = canvas.parentElement.clientWidth - 40;
+      const cssHeight = 420;
+
+      /* Draw at device resolution so text is crisp on high-DPI screens,
+       * then scale back down with CSS. */
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = cssWidth * dpr;
+      canvas.height = cssHeight * dpr;
+      canvas.style.width = cssWidth + "px";
+      canvas.style.height = cssHeight + "px";
+
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = INK.surface;
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+      const plotX = PLOT.left;
+      const plotY = PLOT.top;
+      const plotW = cssWidth - PLOT.left - PLOT.right;
+      const plotH = cssHeight - PLOT.top - PLOT.bottom;
+      if (plotW <= 10 || plotH <= 10) return;
+
+      // ---- the spectrogram itself -------------------------------------
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(offscreen, plotX, plotY, plotW, plotH);
+
+      ctx.strokeStyle = INK.axis;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(plotX + 0.5, plotY + 0.5, plotW, plotH);
+
+      ctx.font = '11px "IBM Plex Mono", monospace';
+
+      // ---- frequency axis (vertical) ----------------------------------
+      let freqTop, freqBottom;
+      if (frequencies && frequencies.length) {
+        freqTop = Math.max(...frequencies);
+        freqBottom = Math.min(...frequencies);
+      }
+      else {
+        freqTop = header.CRVAL2;
+        freqBottom = header.CRVAL2 + (header.CDELT2 || -1) * ((header.NAXIS2 || 1) - 1);
+      }
+
+      ctx.fillStyle = INK.muted;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+
+      niceTicks(Math.min(freqTop, freqBottom), Math.max(freqTop, freqBottom), 6).forEach(freq => {
+        const t = (freqTop - freq) / (freqTop - freqBottom);
+        if (t < -0.001 || t > 1.001) return;
+        const y = plotY + t * plotH;
+
+        ctx.strokeStyle = INK.axis;
+        ctx.beginPath();
+        ctx.moveTo(plotX - 5, y);
+        ctx.lineTo(plotX, y);
+        ctx.stroke();
+
+        ctx.fillText(freq.toFixed(0), plotX - 9, y);
+      });
+
+      ctx.save();
+      ctx.translate(16, plotY + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = INK.text;
+      ctx.fillText("FREQUENCY  [ MHz ]", 0, 0);
+      ctx.restore();
+
+      // ---- time axis (horizontal) -------------------------------------
+      const step = header.CDELT1 || 0.25;
+      const startSec = typeof header.CRVAL1 === "number" ? header.CRVAL1 : 0;
+      const endSec = startSec + width * step;
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+
+      niceTicks(startSec, endSec, 6).forEach(sec => {
+        const t = (sec - startSec) / (endSec - startSec);
+        if (t < -0.001 || t > 1.001) return;
+        const x = plotX + t * plotW;
+
+        ctx.strokeStyle = INK.axis;
+        ctx.beginPath();
+        ctx.moveTo(x, plotY + plotH);
+        ctx.lineTo(x, plotY + plotH + 5);
+        ctx.stroke();
+
+        ctx.fillStyle = INK.muted;
+        ctx.fillText(secondsToClock(sec), x, plotY + plotH + 9);
+      });
+
+      ctx.fillStyle = INK.text;
+      ctx.fillText("TIME  [ UT ]", plotX + plotW / 2, plotY + plotH + 30);
+
+      // ---- title ------------------------------------------------------
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = INK.text;
+      ctx.font = '12px "IBM Plex Mono", monospace';
+      ctx.fillText(
+        (header.INSTRUME || "CALLISTO") + "   " +
+        (header["DATE-OBS"] || "") + "  " + (header["TIME-OBS"] || "").slice(0, 8) + " UT",
+        plotX, plotY - 14
+      );
+
+      /* The processing note goes under the plot, not beside the title --
+       * at narrow widths the two collide, and the title must never be
+       * the thing that gets overwritten. */
+      ctx.textAlign = "right";
+      ctx.fillStyle = INK.faint;
+      ctx.font = '10px "IBM Plex Mono", monospace';
+      ctx.fillText(BGSUB_LABELS[mode] || mode, plotX + plotW, plotY + plotH + 44);
+
+      // ---- colorbar ---------------------------------------------------
+      const barX = plotX + plotW + 22;
+      const barW = PLOT.barWidth;
+
+      const gradient = ctx.createLinearGradient(0, plotY, 0, plotY + plotH);
+      for (let i = 0; i <= 20; i++) {
+        const [r, g, b] = sampleRamp(ramp, Math.pow(1 - i / 20, 1 / contrast));
+        gradient.addColorStop(i / 20, `rgb(${r},${g},${b})`);
+      }
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(barX, plotY, barW, plotH);
+      ctx.strokeStyle = INK.axis;
+      ctx.strokeRect(barX + 0.5, plotY + 0.5, barW, plotH);
+
+      ctx.font = '10px "IBM Plex Mono", monospace';
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = INK.muted;
+
+      niceTicks(lo, hi, 4).forEach(value => {
+        const t = (hi - value) / (hi - lo);
+        if (t < -0.001 || t > 1.001) return;
+        const y = plotY + t * plotH;
+
+        ctx.strokeStyle = INK.axis;
+        ctx.beginPath();
+        ctx.moveTo(barX + barW, y);
+        ctx.lineTo(barX + barW + 4, y);
+        ctx.stroke();
+
+        ctx.fillText(value.toFixed(0), barX + barW + 7, y);
+      });
+
+      ctx.save();
+      ctx.translate(barX + barW + 46, plotY + plotH / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.fillStyle = INK.text;
+      ctx.font = '10px "IBM Plex Mono", monospace';
+      ctx.fillText(
+        mode === "none" ? "DIGITS" : "DIGITS ABOVE BACKGROUND",
+        0, 0
+      );
+      ctx.restore();
+    }
+
+
+    const BGSUB_LABELS = {
+      "channel-mean": "background: per-channel mean (e-Callisto standard)",
+      "channel-median": "background: per-channel median (robust)",
+      "global": "background: global constant",
+      "none": "raw receiver digits"
+    };
 
 
     function renderMeta(file, header) {
@@ -651,6 +1059,14 @@
       drawSpectrogram();
     });
 
+    /* The plot is drawn at the canvas's pixel size, so a window resize
+     * needs a redraw or the axes end up scaled and blurry. */
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(drawSpectrogram, 150);
+    });
+
 
     // ============================================================
     // START
@@ -672,6 +1088,12 @@
           "archive-span",
           dates.length ? dates[0] + " → " + dates[dates.length - 1] : "NO DATA STORED"
         );
+
+        if (dates.length) {
+          const newest = dates[dates.length - 1];
+          selectedYear = newest.slice(0, 4);
+          selectedMonth = newest.slice(5, 7);
+        }
 
         renderCalendar();
 
