@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """eCallisto weather log sender.
 
-Watches a directory of *.csv files on the Raspberry Pi and ships each newly
-appended row to the receiver over TLS, as soon as the row is written. Pinned
-to the receiver's exact certificate fingerprint and authenticated with a
-shared-secret token. Tracks a per-file byte offset in a state file so
-restarts never re-send or skip rows.
+Watches a directory of *.csv files on the Raspberry Pi and ships changes to
+the receiver over TLS. Pinned to the receiver's exact certificate
+fingerprint and authenticated with a shared-secret token.
+
+Each poll, a file's full current content is hashed and compared against
+what was last sent for that file:
+
+- Pure append (everything previously sent is still there unchanged, with
+  new bytes tacked onto the end): ship just the new complete lines as
+  individual ROW messages, persisting state after each one, so a
+  mid-stream disconnect re-sends at most the single line in flight --
+  never a duplicate, never a drop.
+- Anything else -- an in-place edit to already-sent content, or the file
+  getting shorter (rotated/truncated under the same name): ship the whole
+  current file as one FILE message and let the receiver replace its local
+  copy wholesale.
 
 Dependency-free: standard library only.
 """
@@ -18,6 +29,8 @@ import socket
 import ssl
 import sys
 import time
+
+EMPTY_HASH = hashlib.sha256(b"").hexdigest()
 
 
 def log(msg):
@@ -73,31 +86,43 @@ def scan_and_send(sock, cfg, state):
     for path in sorted(glob.glob(pattern)):
         name = os.path.basename(path)
         try:
-            size = os.path.getsize(path)
+            with open(path, "rb") as f:
+                data = f.read()
         except OSError:
             continue
 
-        offset = state.get(name, 0)
-        if size <= offset:
-            continue
+        prev = state.get(name, {"length": 0, "hash": EMPTY_HASH})
+        prev_len = prev["length"]
+        prev_hash = prev["hash"]
 
-        with open(path, "rb") as f:
-            f.seek(offset)
+        if len(data) == prev_len and hashlib.sha256(data).hexdigest() == prev_hash:
+            continue  # unchanged since we last checked
+
+        if len(data) >= prev_len and hashlib.sha256(data[:prev_len]).hexdigest() == prev_hash:
+            # Pure append.
+            pos = prev_len
             while True:
-                line = f.readline()
-                if not line.endswith(b"\n"):
-                    # Partial line (still being written) -- wait for the rest.
+                nl = data.find(b"\n", pos)
+                if nl == -1:
                     break
-                text = line[:-1].decode("utf-8", errors="replace")
-                if text:
-                    sock.sendall(f"{name}\t{text}\n".encode("utf-8"))
-                # Only advance (and persist) the offset once the row has been
-                # sent, so a mid-stream disconnect re-sends it rather than
-                # silently dropping it -- and never re-sends what's already
-                # been acknowledged by a successful send.
-                offset = f.tell()
-                state[name] = offset
+                line = data[pos:nl]
+                pos = nl + 1
+                if line:
+                    text = line.decode("utf-8", errors="replace")
+                    sock.sendall(f"ROW\t{name}\t{text}\n".encode("utf-8"))
+                state[name] = {"length": pos, "hash": hashlib.sha256(data[:pos]).hexdigest()}
                 save_state(cfg["state_file"], state)
+        else:
+            # In-place edit, or the file got shorter (rotated/truncated) --
+            # ship the whole current file and let the receiver replace its
+            # copy wholesale. A resend of identical content on retry is
+            # harmless, since this is a full replace, not an append.
+            header = f"FILE\t{name}\t{len(data)}\n".encode("utf-8")
+            sock.sendall(header)
+            if data:
+                sock.sendall(data)
+            state[name] = {"length": len(data), "hash": hashlib.sha256(data).hexdigest()}
+            save_state(cfg["state_file"], state)
 
 
 def main():

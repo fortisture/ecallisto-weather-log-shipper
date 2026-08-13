@@ -11,19 +11,29 @@ Raspberry Pi                              Windows PC
 ------------                              ----------
 pi/sender.py                              windows/receiver.py
   watches *.csv in a directory   --TLS-->   listens on :9443
-  ships each new row the instant            authenticates the connection
-  it's appended                             (shared-secret token)
-  reconnects automatically                  verifies the sender is talking
-  tracks send-offset in a state             to it via cert-fingerprint pin
-  file (no dupes/drops on restart)          appends rows to matching files
-                                             under incoming_logs/
+  hashes each file every poll,              authenticates the connection
+  compares against what was last            (shared-secret token)
+  sent: pure append -> ship new             verifies the sender is talking
+  rows; anything else changed ->            to it via cert-fingerprint pin
+  ship the whole file, replace              appends new rows, or replaces
+  reconnects automatically                  a file wholesale, under
+  (no dupes/drops on restart)               incoming_logs/
 ```
 
 eCallisto rotates to a new CSV file each day (UTC); within a day, rows are
 appended to that day's file. Both are handled without any special-casing:
 new files are picked up the moment they appear (the watch directory is
-re-scanned every poll), and appends are detected by comparing each file's
-current size against the last-seen offset.
+re-scanned every poll).
+
+Appends and edits are told apart by comparing hashes, not just size: each
+poll, `sender.py` hashes a file's current content and checks whether it
+still starts with exactly what was last sent. If so, it's a pure append —
+only the new complete lines ship, one `ROW` message each, with state
+persisted after every single line so a mid-stream disconnect can't
+duplicate or drop one. If the content before that boundary has changed (an
+in-place edit to an already-shipped row) or the file got shorter (rotated
+or truncated under the same name), the whole current file ships as one
+`FILE` message and the receiver replaces its local copy wholesale.
 
 **First run against a directory that already has old files in it ships
 their full existing contents**, not just rows appended from that point on
@@ -78,9 +88,14 @@ python3 sender.py config.json
    SHA-256 fingerprint matches the pinned value (aborts otherwise).
 2. Client sends `AUTH <token>\n`. Server replies `OK\n` or `DENY\n`
    (constant-time comparison) and closes on mismatch.
-3. Client sends one line per row: `<filename>\t<csv row content>\n`.
-   Server appends `<csv row content>\n` to `incoming_logs/<filename>`
-   (basename only, must end in `.csv` — path traversal is rejected).
+3. Client sends one message per change, one of:
+   - `ROW\t<filename>\t<csv row content>\n` — append one row.
+   - `FILE\t<filename>\t<byte length>\n` followed by exactly
+     `<byte length>` raw bytes — replace the file's entire content.
+
+   In both cases `<filename>` is sanitized to a bare basename ending in
+   `.csv` (path traversal is rejected) before being applied under
+   `incoming_logs/`.
 
 ## Repository layout
 

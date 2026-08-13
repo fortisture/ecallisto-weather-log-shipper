@@ -5,6 +5,33 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [2.0.0] - 2026-08-13
+
+### Changed
+- **Breaking wire-protocol change.** The old design only ever compared a
+  file's current size against a last-seen byte offset, so it could detect
+  appends but was blind to any change to already-shipped content (e.g. a
+  weather-log writer correcting an already-written row in place) — the
+  edited bytes sat before the tracked offset and were never re-examined.
+- `sender.py` now hashes each watched file's full content every poll and
+  compares it against what was last sent. A pure append (previously-sent
+  content unchanged, new bytes only at the end) still ships as individual
+  `ROW\t<filename>\t<row>` messages, with state persisted after each one
+  so a mid-stream disconnect can't duplicate or drop a row. Anything else
+  — an in-place edit, or the file getting shorter (same-name rotation or
+  truncation) — now ships the entire current file as one
+  `FILE\t<filename>\t<byte length>` message, and `receiver.py` replaces
+  its local copy of that file wholesale (atomic write + rename).
+- Old `sender.py` and `receiver.py` builds are not wire-compatible with
+  this version — the line format changed from `<filename>\t<row>` to
+  `ROW\t<filename>\t<row>`, plus the new `FILE` message type.
+
+### Verified
+- Local rehearsal covering: fresh backfill of a pre-existing file, pure
+  append, in-place edit of an already-shipped row, same-name file
+  truncation/rotation, and a sender restart mid-append — all produced a
+  byte-identical result on the receiver with no duplicate or dropped rows.
+
 ## [1.1.0] - 2026-08-13
 
 ### Confirmed

@@ -2,7 +2,13 @@
 """eCallisto weather log receiver.
 
 TLS server that authenticates each incoming connection with a shared-secret
-token and appends received CSV rows to matching local files under --outdir.
+token, then handles two message types from the sender:
+
+- ROW <filename> <row content>  -- append one row to the matching local file.
+- FILE <filename> <byte length> -- replace the matching local file's entire
+  content wholesale (used when the sender detects an in-place edit or a
+  same-name truncation/rotation, not just an append).
+
 Filenames are sanitized to a bare basename ending in .csv, so a connection
 can never write outside --outdir.
 
@@ -39,6 +45,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
 
     f = conn.makefile("rwb")
     row_count = 0
+    file_count = 0
     try:
         line = f.readline()
         if not line.startswith(b"AUTH "):
@@ -55,30 +62,68 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
         conn.sendall(b"OK\n")
         log(f"{peer}: authenticated")
 
-        row_count = 0
         while True:
             line = f.readline()
             if not line:
                 break
             line = line.rstrip(b"\n")
-            if b"\t" not in line:
-                continue
-            raw_name, row = line.split(b"\t", 1)
-            name = safe_filename(raw_name.decode("utf-8", errors="replace"))
-            if not name:
-                log(f"{peer}: rejected unsafe filename {raw_name!r}")
-                continue
-            out_path = os.path.join(cfg["outdir"], name)
-            text = row.decode("utf-8", errors="replace")
-            with lock:
-                with open(out_path, "a", encoding="utf-8", newline="") as out:
-                    out.write(text + "\n")
-            row_count += 1
-    except (OSError, ssl.SSLError) as e:
+            parts = line.split(b"\t", 2)
+            if len(parts) != 3:
+                log(f"{peer}: malformed message {line[:80]!r}, closing")
+                break
+            verb, raw_name, rest = parts
+
+            if verb == b"ROW":
+                name = safe_filename(raw_name.decode("utf-8", errors="replace"))
+                text = rest.decode("utf-8", errors="replace")
+                if not name:
+                    log(f"{peer}: rejected unsafe filename {raw_name!r}")
+                    continue
+                out_path = os.path.join(cfg["outdir"], name)
+                with lock:
+                    with open(out_path, "a", encoding="utf-8", newline="") as out:
+                        out.write(text + "\n")
+                row_count += 1
+
+            elif verb == b"FILE":
+                try:
+                    length = int(rest)
+                    if length < 0:
+                        raise ValueError
+                except ValueError:
+                    log(f"{peer}: bad FILE length {rest!r}, closing")
+                    break
+                remaining = length
+                chunks = []
+                while remaining > 0:
+                    chunk = f.read(remaining)
+                    if not chunk:
+                        raise ConnectionError("connection closed mid-file-transfer")
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                content = b"".join(chunks)
+
+                name = safe_filename(raw_name.decode("utf-8", errors="replace"))
+                if not name:
+                    log(f"{peer}: rejected unsafe filename in FILE message, discarded {length} bytes")
+                    continue
+                out_path = os.path.join(cfg["outdir"], name)
+                tmp_path = out_path + ".tmp"
+                with lock:
+                    with open(tmp_path, "wb") as out:
+                        out.write(content)
+                    os.replace(tmp_path, out_path)
+                file_count += 1
+
+            else:
+                log(f"{peer}: unknown verb {verb!r}, closing")
+                break
+
+    except (OSError, ssl.SSLError, ConnectionError) as e:
         log(f"{peer}: connection error: {e}")
     finally:
         conn.close()
-        log(f"{peer}: disconnected ({row_count} rows written)")
+        log(f"{peer}: disconnected ({row_count} rows, {file_count} full-file replacements)")
 
 
 def main():
