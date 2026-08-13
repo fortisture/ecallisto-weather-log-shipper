@@ -1,0 +1,1635 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>ARRAY-7 · Site Conditions</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link
+    rel="stylesheet"
+    href="./styles.css"
+  >
+
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"
+  ></script>
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+
+    <!-- ========================================================= -->
+    <!-- HEADER                                                    -->
+    <!-- ========================================================= -->
+
+    <header>
+
+      <div class="id-block">
+
+        <div class="eyebrow">
+          Site Conditions
+        </div>
+
+        <h1>
+          ARRAY-7
+          <span>/ Weather Station</span>
+        </h1>
+
+      </div>
+
+
+      <div class="status-block">
+
+        <div class="status-line">
+
+          <span
+            class="dot"
+            id="status-dot"
+          ></span>
+
+          <span id="connection-status">
+            INITIALIZING
+          </span>
+
+        </div>
+
+        <div id="last-updated">
+          WAITING FOR DATA
+        </div>
+
+      </div>
+
+    </header>
+
+
+
+    <!-- ========================================================= -->
+    <!-- DEBUG / ERROR MESSAGE                                     -->
+    <!-- ========================================================= -->
+
+    <div
+      id="error-panel"
+      class="error-panel"
+    ></div>
+
+
+
+    <!-- ========================================================= -->
+    <!-- CURRENT CONDITIONS                                        -->
+    <!-- ========================================================= -->
+
+    <section class="panel">
+
+      <div class="panel-head">
+
+        <span class="label">
+          Current Conditions
+        </span>
+
+        <span class="tag">
+          LOCAL JSON
+        </span>
+
+      </div>
+
+
+      <div class="conditions">
+
+
+        <!-- Main temperature -->
+
+        <div>
+
+          <div class="reading-main">
+
+            <span
+              class="reading-value"
+              id="current-temp"
+            >
+              —
+            </span>
+
+            <span class="reading-unit">
+              °C
+            </span>
+
+          </div>
+
+
+          <div
+            class="reading-sub"
+            id="current-timestamp"
+          >
+            AWAITING READING
+          </div>
+
+        </div>
+
+
+
+        <!-- 24 hour statistics -->
+
+        <div class="telemetry-strip">
+
+
+          <div class="telemetry-cell">
+
+            <div class="t-label">
+              24H Min
+            </div>
+
+            <div
+              class="t-value"
+              id="stat-min"
+            >
+              —
+            </div>
+
+          </div>
+
+
+
+          <div class="telemetry-cell ok">
+
+            <div class="t-label">
+              24H Avg
+            </div>
+
+            <div
+              class="t-value"
+              id="stat-avg"
+            >
+              —
+            </div>
+
+          </div>
+
+
+
+          <div class="telemetry-cell warn">
+
+            <div class="t-label">
+              24H Max
+            </div>
+
+            <div
+              class="t-value"
+              id="stat-max"
+            >
+              —
+            </div>
+
+          </div>
+
+
+        </div>
+
+      </div>
+
+    </section>
+
+
+
+    <!-- ========================================================= -->
+    <!-- TEMPERATURE CHART                                         -->
+    <!-- ========================================================= -->
+
+    <section class="panel chart-panel">
+
+      <div class="panel-head">
+
+        <span class="label">
+          Temperature · 24H Trend
+        </span>
+
+        <span
+          class="tag"
+          id="sample-label"
+        >
+          LOADING
+        </span>
+
+      </div>
+
+
+      <div class="chart-body">
+
+        <canvas id="temp-chart"></canvas>
+
+        <div
+          id="chart-fallback"
+          class="chart-fallback"
+        >
+          <span class="chart-fallback-dot"></span>
+          CHART LIBRARY UNAVAILABLE
+        </div>
+
+      </div>
+
+
+      <div class="chart-footer">
+
+        <span id="chart-range">
+          AWAITING DATA
+        </span>
+
+        <span id="sample-count">
+          — SAMPLES
+        </span>
+
+      </div>
+
+    </section>
+
+
+
+    <!-- ========================================================= -->
+    <!-- FOOTER                                                    -->
+    <!-- ========================================================= -->
+
+    <footer class="page-footer">
+
+      ARRAY-7 GROUND SUPPORT · LOCAL JSON · UTC
+
+    </footer>
+
+
+  </div>
+
+
+
+  <!-- =========================================================== -->
+  <!-- JAVASCRIPT                                                  -->
+  <!-- =========================================================== -->
+
+  <script>
+
+
+    /*
+     * ============================================================
+     * ARRAY-7 WEATHER DASHBOARD
+     * ============================================================
+     *
+     * THIS VERSION USES STATIC JSON FILES.
+     *
+     * Required files:
+     *
+     * ./api/weather/latest.json
+     * ./api/weather/history.json
+     *
+     *
+     * IMPORTANT:
+     *
+     * The page should be opened through a local web server,
+     * for example VS Code Live Server:
+     *
+     * http://127.0.0.1:5500/
+     *
+     * Do NOT normally open the page as:
+     *
+     * file:///C:/.../index.html
+     *
+     * because browsers generally block fetch() requests to
+     * local files.
+     *
+     * ============================================================
+     */
+
+
+    let tempChart = null;
+
+
+
+    // ============================================================
+    // FILE PATHS
+    // ============================================================
+
+    const LATEST_URL =
+      "./api/weather/latest.json";
+
+    const HISTORY_URL =
+      "./api/weather/history.json";
+
+
+
+    // ============================================================
+    // DOM HELPERS
+    // ============================================================
+
+    function element(id) {
+
+      return document.getElementById(id);
+
+    }
+
+
+
+    function showError(message) {
+
+      const panel =
+        element("error-panel");
+
+      panel.textContent =
+        message;
+
+      panel.style.display =
+        "block";
+
+
+      element(
+        "connection-status"
+      ).textContent =
+        "DATA: ERROR";
+
+
+      element(
+        "last-updated"
+      ).textContent =
+        "SYNC FAILED";
+
+
+      element(
+        "status-dot"
+      ).style.background =
+        "#E85D5D";
+
+    }
+
+
+
+    function clearError() {
+
+      const panel =
+        element("error-panel");
+
+      panel.textContent =
+        "";
+
+      panel.style.display =
+        "none";
+
+
+      element(
+        "status-dot"
+      ).style.background =
+        "var(--signal)";
+
+    }
+
+
+
+    // ============================================================
+    // JSON LOADING
+    // ============================================================
+
+    async function fetchJSON(url) {
+
+      console.log(
+        "[ARRAY-7] Loading:",
+        url
+      );
+
+
+      let response;
+
+
+      try {
+
+        response =
+          await fetch(
+            url +
+            "?_=" +
+            Date.now(),
+            {
+              method: "GET",
+
+              headers: {
+                "Accept":
+                  "application/json"
+              },
+
+              cache: "no-store"
+            }
+          );
+
+      }
+
+      catch (networkError) {
+
+        throw new Error(
+          "Could not fetch:\n" +
+          url +
+          "\n\n" +
+          "Browser error:\n" +
+          networkError.message +
+          "\n\n" +
+          "Make sure you are running the website through a local web server such as VS Code Live Server."
+        );
+
+      }
+
+
+      if (!response.ok) {
+
+        throw new Error(
+          "JSON FILE NOT FOUND:\n" +
+          url +
+          "\n\n" +
+          "HTTP status: " +
+          response.status +
+          "\n\n" +
+          "Check that the file exists at exactly this path."
+        );
+
+      }
+
+
+      let data;
+
+
+      try {
+
+        data =
+          await response.json();
+
+      }
+
+      catch (jsonError) {
+
+        throw new Error(
+          "INVALID JSON:\n" +
+          url +
+          "\n\n" +
+          "The file was found, but the browser could not parse it as JSON.\n\n" +
+          "Check for missing commas, quotes, or unusual characters."
+        );
+
+      }
+
+
+      console.log(
+        "[ARRAY-7] Loaded successfully:",
+        url,
+        data
+      );
+
+
+      return data;
+
+    }
+
+
+
+    // ============================================================
+    // LOAD LATEST
+    // ============================================================
+
+    async function loadLatestWeather() {
+
+      return fetchJSON(
+        LATEST_URL
+      );
+
+    }
+
+
+
+    // ============================================================
+    // LOAD HISTORY
+    // ============================================================
+
+    async function loadWeatherHistory() {
+
+      return fetchJSON(
+        HISTORY_URL
+      );
+
+    }
+
+
+
+    // ============================================================
+    // DATE FUNCTIONS
+    // ============================================================
+
+    function parseDate(value) {
+
+      if (
+        value === null ||
+        value === undefined ||
+        value === ""
+      ) {
+
+        throw new Error(
+          "Missing timestamp"
+        );
+
+      }
+
+
+      const date =
+        new Date(value);
+
+
+      if (
+        Number.isNaN(
+          date.getTime()
+        )
+      ) {
+
+        throw new Error(
+          "Invalid timestamp: " +
+          value
+        );
+
+      }
+
+
+      return date;
+
+    }
+
+
+
+    function fmtTime(value) {
+
+      const date =
+        parseDate(value);
+
+
+      return (
+        date
+          .toISOString()
+          .slice(11, 16) +
+        " UTC"
+      );
+
+    }
+
+
+
+    function fmtFullTime(value) {
+
+      const date =
+        parseDate(value);
+
+
+      return (
+        date
+          .toISOString()
+          .replace("T", " ")
+          .slice(0, 16) +
+        " UTC"
+      );
+
+    }
+
+
+
+    function fmtDate(value) {
+
+      const date =
+        parseDate(value);
+
+
+      return (
+        date
+          .toISOString()
+          .slice(0, 10)
+      );
+
+    }
+
+
+
+    // ============================================================
+    // NUMBER FUNCTIONS
+    // ============================================================
+
+    function numberOrNull(value) {
+
+      if (
+        value === null ||
+        value === undefined ||
+        value === ""
+      ) {
+
+        return null;
+
+      }
+
+
+      const number =
+        Number(value);
+
+
+      if (
+        !Number.isFinite(number)
+      ) {
+
+        return null;
+
+      }
+
+
+      return number;
+
+    }
+
+
+
+    function formatTemperature(
+      value,
+      decimals = 1
+    ) {
+
+      const number =
+        numberOrNull(value);
+
+
+      if (number === null) {
+
+        return "—";
+
+      }
+
+
+      return number.toFixed(
+        decimals
+      );
+
+    }
+
+
+
+    // ============================================================
+    // VALIDATE LATEST JSON
+    // ============================================================
+
+    function validateLatest(data) {
+
+      if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data)
+      ) {
+
+        throw new Error(
+          "latest.json must contain a JSON object."
+        );
+
+      }
+
+
+      if (
+        !("temp_c" in data)
+      ) {
+
+        throw new Error(
+          'latest.json is missing the "temp_c" field.'
+        );
+
+      }
+
+
+      if (
+        !("timestamp" in data)
+      ) {
+
+        throw new Error(
+          'latest.json is missing the "timestamp" field.'
+        );
+
+      }
+
+
+      if (
+        numberOrNull(
+          data.temp_c
+        ) === null
+      ) {
+
+        throw new Error(
+          'latest.json contains an invalid "temp_c" value.'
+        );
+
+      }
+
+
+      parseDate(
+        data.timestamp
+      );
+
+    }
+
+
+
+    // ============================================================
+    // VALIDATE HISTORY JSON
+    // ============================================================
+
+    function validateHistory(data) {
+
+      if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data)
+      ) {
+
+        throw new Error(
+          "history.json must contain an object with a readings array."
+        );
+
+      }
+
+
+      if (
+        !Array.isArray(
+          data.readings
+        )
+      ) {
+
+        throw new Error(
+          'history.json must contain: { "readings": [...] }'
+        );
+
+      }
+
+
+      data.readings.forEach(
+        (reading, index) => {
+
+          if (
+            !reading ||
+            typeof reading !== "object"
+          ) {
+
+            throw new Error(
+              "history.json reading #" +
+              (index + 1) +
+              " is invalid."
+            );
+
+          }
+
+
+          if (
+            !reading.timestamp
+          ) {
+
+            throw new Error(
+              "history.json reading #" +
+              (index + 1) +
+              " is missing timestamp."
+            );
+
+          }
+
+
+          parseDate(
+            reading.timestamp
+          );
+
+
+          /*
+           * temp_c may be null.
+           */
+
+          if (
+            reading.temp_c !== null &&
+            reading.temp_c !== undefined &&
+            numberOrNull(
+              reading.temp_c
+            ) === null
+          ) {
+
+            throw new Error(
+              "history.json reading #" +
+              (index + 1) +
+              " has an invalid temp_c."
+            );
+
+          }
+
+        }
+      );
+
+    }
+
+
+
+    // ============================================================
+    // STATISTICS
+    // ============================================================
+
+    function calculateStats(
+      readings
+    ) {
+
+      const temperatures =
+        readings
+
+          .map(
+            reading =>
+              numberOrNull(
+                reading.temp_c
+              )
+          )
+
+          .filter(
+            value =>
+              value !== null
+          );
+
+
+      if (
+        temperatures.length === 0
+      ) {
+
+        return {
+          min: null,
+          avg: null,
+          max: null
+        };
+
+      }
+
+
+      const min =
+        Math.min(
+          ...temperatures
+        );
+
+
+      const max =
+        Math.max(
+          ...temperatures
+        );
+
+
+      const total =
+        temperatures.reduce(
+          (sum, value) =>
+            sum + value,
+          0
+        );
+
+
+      const avg =
+        total /
+        temperatures.length;
+
+
+      return {
+        min,
+        avg,
+        max
+      };
+
+    }
+
+
+
+    // ============================================================
+    // RENDER CURRENT CONDITIONS
+    // ============================================================
+
+    function renderConditions(
+      latest,
+      history
+    ) {
+
+      /*
+       * CURRENT TEMPERATURE
+       */
+
+      element(
+        "current-temp"
+      ).textContent =
+        formatTemperature(
+          latest.temp_c
+        );
+
+
+      /*
+       * CURRENT TIMESTAMP
+       */
+
+      element(
+        "current-timestamp"
+      ).textContent =
+        "READING AT " +
+        fmtFullTime(
+          latest.timestamp
+        );
+
+
+      /*
+       * STATISTICS
+       */
+
+      const stats =
+        calculateStats(
+          history.readings
+        );
+
+
+      element(
+        "stat-min"
+      ).textContent =
+        stats.min === null
+          ? "—"
+          : formatTemperature(
+              stats.min
+            ) + "°";
+
+
+      element(
+        "stat-avg"
+      ).textContent =
+        stats.avg === null
+          ? "—"
+          : formatTemperature(
+              stats.avg
+            ) + "°";
+
+
+      element(
+        "stat-max"
+      ).textContent =
+        stats.max === null
+          ? "—"
+          : formatTemperature(
+              stats.max
+            ) + "°";
+
+
+      /*
+       * SYNC TIME
+       */
+
+      element(
+        "last-updated"
+      ).textContent =
+        "SYNCED " +
+        fmtFullTime(
+          latest.timestamp
+        );
+
+
+      /*
+       * CONNECTION
+       */
+
+      element(
+        "connection-status"
+      ).textContent =
+        "DATA: WEATHER ONLINE";
+
+    }
+
+
+
+    // ============================================================
+    // RENDER CHART
+    // ============================================================
+
+    function renderChart(
+      history
+    ) {
+
+      const readings =
+        history.readings;
+
+
+      /*
+       * If Chart.js didn't load,
+       * don't crash the dashboard.
+       */
+
+      if (
+        typeof Chart ===
+        "undefined"
+      ) {
+
+        element(
+          "chart-fallback"
+        ).style.display =
+          "flex";
+
+
+        element(
+          "sample-label"
+        ).textContent =
+          "CHART OFFLINE";
+
+
+        return;
+
+      }
+
+
+      const labels =
+        readings.map(
+          reading => {
+
+            try {
+
+              return fmtTime(
+                reading.timestamp
+              );
+
+            }
+
+            catch {
+
+              return "";
+
+            }
+
+          }
+        );
+
+
+      const values =
+        readings.map(
+          reading =>
+            numberOrNull(
+              reading.temp_c
+            )
+        );
+
+
+      const canvas =
+        element(
+          "temp-chart"
+        );
+
+
+      const ctx =
+        canvas.getContext(
+          "2d"
+        );
+
+
+      if (tempChart) {
+
+        tempChart.destroy();
+
+      }
+
+
+      const gradient =
+        ctx.createLinearGradient(
+          0,
+          0,
+          0,
+          300
+        );
+
+
+      gradient.addColorStop(
+        0,
+        "rgba(79, 216, 196, 0.28)"
+      );
+
+
+      gradient.addColorStop(
+        1,
+        "rgba(79, 216, 196, 0)"
+      );
+
+
+      tempChart =
+        new Chart(
+          ctx,
+          {
+
+            type: "line",
+
+
+            data: {
+
+              labels: labels,
+
+
+              datasets: [
+
+                {
+
+                  label:
+                    "Temperature (°C)",
+
+                  data: values,
+
+                  borderColor:
+                    "#4FD8C4",
+
+                  backgroundColor:
+                    gradient,
+
+                  borderWidth: 1.5,
+
+                  pointRadius: 0,
+
+                  pointHoverRadius: 4,
+
+                  pointHoverBackgroundColor:
+                    "#4FD8C4",
+
+                  pointHoverBorderColor:
+                    "#0A0E13",
+
+                  fill: true,
+
+                  tension: 0.25,
+
+                  spanGaps: false
+
+                }
+
+              ]
+
+            },
+
+
+            options: {
+
+              responsive: true,
+
+              maintainAspectRatio:
+                false,
+
+
+              interaction: {
+
+                mode: "index",
+
+                intersect: false
+
+              },
+
+
+              plugins: {
+
+                legend: {
+
+                  display: false
+
+                },
+
+
+                tooltip: {
+
+                  backgroundColor:
+                    "#151D27",
+
+                  borderColor:
+                    "#263140",
+
+                  borderWidth: 1,
+
+                  titleColor:
+                    "#6B7A8B",
+
+                  bodyColor:
+                    "#DCE4EC",
+
+                  padding: 10,
+
+                  displayColors:
+                    false,
+
+
+                  titleFont: {
+
+                    family:
+                      "IBM Plex Mono",
+
+                    size: 10
+
+                  },
+
+
+                  bodyFont: {
+
+                    family:
+                      "IBM Plex Mono",
+
+                    size: 12
+
+                  },
+
+
+                  callbacks: {
+
+                    label:
+                      function(item) {
+
+                        if (
+                          item.parsed.y ===
+                          null
+                        ) {
+
+                          return (
+                            "Temperature —"
+                          );
+
+                        }
+
+
+                        return (
+                          item.parsed.y
+                            .toFixed(2) +
+                          " °C"
+                        );
+
+                      }
+
+                  }
+
+                }
+
+              },
+
+
+              scales: {
+
+                x: {
+
+                  grid: {
+
+                    color:
+                      "#1A2229",
+
+                    drawTicks:
+                      false
+
+                  },
+
+
+                  ticks: {
+
+                    color:
+                      "#45525F",
+
+                    maxTicksLimit: 8,
+
+                    maxRotation: 0,
+
+
+                    font: {
+
+                      family:
+                        "IBM Plex Mono",
+
+                      size: 10
+
+                    }
+
+                  },
+
+
+                  border: {
+
+                    color:
+                      "#263140"
+
+                  }
+
+                },
+
+
+                y: {
+
+                  grid: {
+
+                    color:
+                      "#1A2229",
+
+                    drawTicks:
+                      false
+
+                  },
+
+
+                  ticks: {
+
+                    color:
+                      "#45525F",
+
+
+                    font: {
+
+                      family:
+                        "IBM Plex Mono",
+
+                      size: 10
+
+                    },
+
+
+                    callback:
+                      value =>
+                        Number(value)
+                          .toFixed(0) +
+                        "°"
+
+                  },
+
+
+                  border: {
+
+                    display: false
+
+                  }
+
+                }
+
+              }
+
+            }
+
+          }
+        );
+
+
+      /*
+       * CHART FOOTER
+       */
+
+      if (
+        readings.length === 0
+      ) {
+
+        element(
+          "chart-range"
+        ).textContent =
+          "NO HISTORY DATA";
+
+
+        element(
+          "sample-count"
+        ).textContent =
+          "0 SAMPLES";
+
+
+        element(
+          "sample-label"
+        ).textContent =
+          "NO DATA";
+
+
+        return;
+
+      }
+
+
+      const first =
+        readings[0].timestamp;
+
+
+      const last =
+        readings[
+          readings.length - 1
+        ].timestamp;
+
+
+      element(
+        "chart-range"
+      ).textContent =
+        fmtDate(first) +
+        " " +
+        fmtTime(first) +
+        " → " +
+        fmtTime(last);
+
+
+      element(
+        "sample-count"
+      ).textContent =
+        readings.length +
+        " SAMPLES";
+
+
+      /*
+       * Sampling interval
+       */
+
+      if (
+        readings.length >= 2
+      ) {
+
+        const firstDate =
+          parseDate(
+            readings[0].timestamp
+          );
+
+
+        const secondDate =
+          parseDate(
+            readings[1].timestamp
+          );
+
+
+        const minutes =
+          Math.round(
+            Math.abs(
+              secondDate.getTime() -
+              firstDate.getTime()
+            ) /
+            60000
+          );
+
+
+        if (
+          Number.isFinite(
+            minutes
+          ) &&
+          minutes > 0
+        ) {
+
+          element(
+            "sample-label"
+          ).textContent =
+            minutes +
+            " MIN SAMPLE";
+
+        }
+
+        else {
+
+          element(
+            "sample-label"
+          ).textContent =
+            "VARIABLE SAMPLE";
+
+        }
+
+      }
+
+      else {
+
+        element(
+          "sample-label"
+        ).textContent =
+          "1 SAMPLE";
+
+      }
+
+    }
+
+
+
+    // ============================================================
+    // LOAD EVERYTHING
+    // ============================================================
+
+    async function loadDashboard() {
+
+      clearError();
+
+
+      console.log(
+        "================================"
+      );
+
+      console.log(
+        "ARRAY-7 DASHBOARD STARTING"
+      );
+
+      console.log(
+        "Latest:",
+        LATEST_URL
+      );
+
+      console.log(
+        "History:",
+        HISTORY_URL
+      );
+
+      console.log(
+        "================================"
+      );
+
+
+      try {
+
+        /*
+         * Load BOTH JSON files.
+         */
+
+        const latest =
+          await loadLatestWeather();
+
+
+        const history =
+          await loadWeatherHistory();
+
+
+        /*
+         * Validate them.
+         */
+
+        validateLatest(
+          latest
+        );
+
+
+        validateHistory(
+          history
+        );
+
+
+        /*
+         * Render data.
+         */
+
+        renderConditions(
+          latest,
+          history
+        );
+
+
+        renderChart(
+          history
+        );
+
+
+        /*
+         * Success.
+         */
+
+        console.log(
+          "[ARRAY-7] DASHBOARD READY"
+        );
+
+
+        console.log(
+          "[ARRAY-7] Current temperature:",
+          latest.temp_c,
+          "°C"
+        );
+
+
+        console.log(
+          "[ARRAY-7] History samples:",
+          history.readings.length
+        );
+
+
+      }
+
+      catch (error) {
+
+        console.error(
+          "[ARRAY-7] DASHBOARD FAILED",
+          error
+        );
+
+
+        showError(
+          error.message
+        );
+
+      }
+
+    }
+
+
+
+    // ============================================================
+    // START
+    // ============================================================
+
+    loadDashboard();
+
+
+  </script>
+
+</body>
+
+</html>

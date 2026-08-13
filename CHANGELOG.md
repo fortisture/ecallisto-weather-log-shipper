@@ -5,6 +5,21 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [2.1.0] - 2026-08-13
+
+### Added
+- `rag-web-ui/` — a browser dashboard showing live weather conditions.
+  `generate_dashboard_api.py` watches `windows/incoming_logs/*.csv` (read
+  only -- it never touches `sender.py` or `receiver.py`) and regenerates
+  the static `web/api/weather/latest.json` / `history.json` the dashboard
+  reads via `fetch()`. Only CSVs with a `timestamp` column are picked up;
+  files without one are skipped rather than raising, and naive
+  `YYYY-MM-DD HH:MM:SS` timestamps are normalized to UTC ISO-8601 so the
+  browser doesn't misread them as local time.
+- Verified end-to-end against real shipped data (including stray
+  non-weather CSVs already sitting in `incoming_logs/`, confirmed skipped
+  without error).
+
 ## [2.0.2] - 2026-08-13
 
 ### Fixed

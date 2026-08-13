@@ -100,10 +100,11 @@ python3 sender.py config.json
 ## Repository layout
 
 ```
-pi/sender.py               sender, runs on the Pi
-pi/setup_pi.sh              installs sender.py as a systemd service
-pi/config.example.json      config template (fill in and copy to the Pi)
-windows/receiver.py         receiver, runs on the Windows PC
-windows/install_and_run.ps1 generates secrets + registers the receiver
+pi/sender.py                  sender, runs on the Pi
+pi/setup_pi.sh                 installs sender.py as a systemd service
+pi/config.example.json         config template (fill in and copy to the Pi)
+windows/receiver.py            receiver, runs on the Windows PC
+windows/install_and_run.ps1    generates secrets + registers the receiver
+rag-web-ui/                    browser dashboard reading incoming_logs/ (see rag-web-ui/README.md)
 CHANGELOG.md
 ```
