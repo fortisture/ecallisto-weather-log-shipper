@@ -120,7 +120,8 @@ pi/config.example.json         config template (fill in and copy to the Pi)
 windows/receiver.py            TLS ingest, used by server.py
 windows/install_and_run.ps1    generates secrets + firewall + scheduled task
 rag-web-ui/                    the web UI and its data tooling
-data/                          local store (gitignored -- see below)
+data/                          local store, year/month/day (gitignored)
+migrate_store_layout.py        moves an old flat store into the new layout
 M&M EXPLANATION FOR DUMMIES.md full plain-English explanation of everything
 CHANGELOG.md
 ```

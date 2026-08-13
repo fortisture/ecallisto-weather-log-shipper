@@ -220,23 +220,68 @@ Each incoming connection is handled on its own **thread** (an independent
 line of execution), so a slow or stuck connection can't block others.
 
 There is a third: **`BLOB`** — a binary file (a CALLISTO spectrogram),
-stored under the FITS folder. Same shape as `FILE`, but the content is not
-text and it gets filed into a per-day folder taken from the filename:
-
-```python
-BLOB_DATE = re.compile(r"_(\d{8})_\d{6}_\d{2}\.")
-
-def blob_subdir(name):
-    match = BLOB_DATE.search(name)
-    if not match:
-        return "undated"
-    stamp = match.group(1)                       # e.g. "20250909"
-    return f"{stamp[0:4]}-{stamp[4:6]}-{stamp[6:8]}"   # -> "2025-09-09"
-```
+stored under the FITS folder.
 
 This is what makes the PC a real database for the station: **both** the
 weather rows and the spectrograms arrive over the same authenticated
 connection, so the Pi's SD card stops being the only copy of anything.
+
+### How the store is organised
+
+Both stores are laid out **year / month / day**:
+
+```
+data/
+  weather/
+    2026/07/08/visnjan_weather_20260708.csv
+    2026/07/09/visnjan_weather_20260709.csv
+  fits/
+    2025/09/09/Croatia-Visnjan_20250909_075911_03.fit.gz
+```
+
+This mirrors how the e-Callisto archive itself is organised, and it
+matters for a practical reason: a single flat folder becomes unusable
+after a few thousand files (slow to list, impossible to browse), while a
+nested tree can be browsed, backed up, or pruned one period at a time.
+
+The date comes from the **filename**, not from the clock or the file
+contents:
+
+```python
+DATE_PATTERNS = (
+    re.compile(r"[_-](\d{4})(\d{2})(\d{2})[_.-]"),   # ..._20250909_...
+    re.compile(r"(\d{4})-(\d{2})-(\d{2})"),          # ...2026-08-13...
+    re.compile(r"(\d{4})(\d{2})(\d{2})"),
+)
+
+def date_subdir(name):
+    for pattern in DATE_PATTERNS:
+        match = pattern.search(name)
+        if not match:
+            continue
+        year, month, day = match.group(1), match.group(2), match.group(3)
+        if 1970 <= int(year) <= 2999 and 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            return year, month, day
+    return None
+```
+
+A file whose name carries **no** date goes into an `undated/` folder
+rather than being guessed at. Filing real measurements under a day they
+didn't come from would be worse than admitting we don't know.
+
+Because appends are matched by filename, a daily-rotated log keeps landing
+in the same dated folder for its whole day, then naturally moves to the
+next one when the station rotates at UTC midnight.
+
+**Migrating an existing store:** `migrate_store_layout.py` moves files
+from the old flat layout into the new tree. It's a dry run by default:
+
+```bash
+python migrate_store_layout.py            # show what would move
+python migrate_store_layout.py --apply    # actually move
+```
+
+It never overwrites or deletes: a name collision is reported and skipped.
 
 ### Two things it does carefully
 
@@ -910,6 +955,24 @@ Real bugs, found by testing rather than reading:
     `FILE`/`BLOB` name failed validation, the payload bytes still had to be
     read off the connection — otherwise every following message would be
     parsed starting from the middle of the discarded file.
+
+11. **Spectrograms were rendered upside down.** I had assumed CALLISTO
+    writes row 0 at the low-frequency end and flipped the image to
+    compensate. It writes row 0 at the **high**-frequency end (the
+    frequency table runs 404 → 45 MHz), so the flip *created* the problem
+    instead of fixing it. What made it hard to spot: the axis labels were
+    drawn independently and were correct, so the plot looked entirely
+    plausible — 400 MHz printed at the top, with 45 MHz data underneath
+    it. The fix reads the ordering from the frequency table rather than
+    assuming it:
+
+    ```javascript
+    const ascending = freqs && freqs.length > 1
+      ? freqs[0] < freqs[freqs.length - 1]
+      : (currentImage.header.CDELT2 || -1) > 0;
+
+    const sourceRow = ascending ? height - 1 - y : y;
+    ```
 
 ---
 

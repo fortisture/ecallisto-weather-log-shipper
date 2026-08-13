@@ -86,9 +86,21 @@ def dew_point_c(temp_c, humidity_pct):
     return round((b * alpha) / (a - alpha), 1)
 
 
+def find_csv_files(incoming_dir):
+    """Every CSV in the store, at any depth.
+
+    The store is laid out year/month/day, so a flat glob would find
+    nothing. Sorted by path, which for this layout is also chronological
+    order -- zero-padded date components sort correctly as text.
+    """
+    return sorted(
+        glob.glob(os.path.join(incoming_dir, "**", "*.csv"), recursive=True)
+    )
+
+
 def load_all_readings(incoming_dir):
     readings = []
-    for path in sorted(glob.glob(os.path.join(incoming_dir, "*.csv"))):
+    for path in find_csv_files(incoming_dir):
         try:
             with open(path, newline="", encoding="utf-8", errors="replace") as f:
                 reader = csv.DictReader(f)
@@ -210,7 +222,7 @@ def generate(incoming_dir, api_dir, history_hours):
 
 def hash_dir(incoming_dir):
     h = hashlib.sha256()
-    for path in sorted(glob.glob(os.path.join(incoming_dir, "*.csv"))):
+    for path in find_csv_files(incoming_dir):
         try:
             with open(path, "rb") as f:
                 h.update(path.encode("utf-8", "replace"))

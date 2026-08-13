@@ -56,36 +56,53 @@ def load_module(name, path):
 # FITS index
 # --------------------------------------------------------------------
 
+def iter_store_days(root):
+    """Yield (date_key, "YYYY/MM/DD", absolute path) for a year/month/day store."""
+    if not os.path.isdir(root):
+        return
+
+    for year in sorted(os.listdir(root)):
+        year_path = os.path.join(root, year)
+        if not (os.path.isdir(year_path) and year.isdigit() and len(year) == 4):
+            continue
+
+        for month in sorted(os.listdir(year_path)):
+            month_path = os.path.join(year_path, month)
+            if not (os.path.isdir(month_path) and month.isdigit()):
+                continue
+
+            for day in sorted(os.listdir(month_path)):
+                day_path = os.path.join(month_path, day)
+                if not (os.path.isdir(day_path) and day.isdigit()):
+                    continue
+                try:
+                    datetime.strptime(f"{year}-{month}-{day}", "%Y-%m-%d")
+                except ValueError:
+                    continue
+                yield f"{year}-{month}-{day}", f"{year}/{month}/{day}", day_path
+
+
 def build_fits_index(fits_dir, api_dir):
     """Index locally stored spectrograms, marking every day in the span
     as recording or not -- the gaps are as informative as the data."""
     days = {}
 
-    if os.path.isdir(fits_dir):
-        for entry in sorted(os.listdir(fits_dir)):
-            day_path = os.path.join(fits_dir, entry)
-            if not os.path.isdir(day_path):
+    for date_key, url_path, day_path in iter_store_days(fits_dir):
+        files = []
+        for name in sorted(os.listdir(day_path)):
+            match = FITS_NAME.match(name)
+            if not match:
                 continue
-            try:
-                datetime.strptime(entry, "%Y-%m-%d")
-            except ValueError:
-                continue
+            hhmmss = match.group(2)
+            files.append({
+                "name": name,
+                "time": f"{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}",
+                "url": f"/fits/{url_path}/{name}",
+                "size": os.path.getsize(os.path.join(day_path, name)),
+            })
 
-            files = []
-            for name in sorted(os.listdir(day_path)):
-                match = FITS_NAME.match(name)
-                if not match:
-                    continue
-                hhmmss = match.group(2)
-                files.append({
-                    "name": name,
-                    "time": f"{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}",
-                    "url": f"/fits/{entry}/{name}",
-                    "size": os.path.getsize(os.path.join(day_path, name)),
-                })
-
-            if files:
-                days[entry] = files
+        if files:
+            days[date_key] = files
 
     available = sorted(days)
     calendar = []
@@ -246,14 +263,10 @@ def clean_stale_temp_files(*dirs, max_age=3600):
 
 
 def fits_fingerprint(fits_dir):
-    if not os.path.isdir(fits_dir):
-        return ()
-    out = []
-    for entry in sorted(os.listdir(fits_dir)):
-        day_path = os.path.join(fits_dir, entry)
-        if os.path.isdir(day_path):
-            out.append((entry, len(os.listdir(day_path))))
-    return tuple(out)
+    return tuple(
+        (date_key, len(os.listdir(day_path)))
+        for date_key, _, day_path in iter_store_days(fits_dir)
+    )
 
 
 # --------------------------------------------------------------------

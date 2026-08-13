@@ -40,7 +40,17 @@ def safe_filename(name):
 
 
 BLOB_SUFFIXES = (".fit.gz", ".fits.gz", ".fit", ".fits")
-BLOB_DATE = re.compile(r"_(\d{8})_\d{6}_\d{2}\.")
+
+# Dates as they appear in station filenames, most specific first:
+#   Croatia-Visnjan_20250909_075911_03.fit.gz   -> 20250909
+#   weather_2026-08-13.csv                      -> 2026-08-13
+DATE_PATTERNS = (
+    re.compile(r"[_-](\d{4})(\d{2})(\d{2})[_.-]"),
+    re.compile(r"(\d{4})-(\d{2})-(\d{2})"),
+    re.compile(r"(\d{4})(\d{2})(\d{2})"),
+)
+
+UNDATED_DIR = "undated"
 
 
 def safe_blob_name(name):
@@ -58,14 +68,32 @@ def safe_blob_name(name):
     return name
 
 
-def blob_subdir(name):
-    """CALLISTO files embed their date; file them into per-day folders so
-    the store stays browsable instead of becoming one huge directory."""
-    match = BLOB_DATE.search(name)
-    if not match:
-        return "undated"
-    stamp = match.group(1)
-    return f"{stamp[0:4]}-{stamp[4:6]}-{stamp[6:8]}"
+def date_subdir(name):
+    """Return ("YYYY", "MM", "DD") parsed out of a station filename.
+
+    Both stores are laid out year/month/day, mirroring how the e-Callisto
+    archive itself is organised: a single flat folder becomes unusable
+    after a few thousand files, and a nested tree can be browsed, backed
+    up or pruned one period at a time.
+
+    Files whose name carries no date (a log that isn't rotated daily, say)
+    go to an "undated" folder rather than being guessed at -- inventing a
+    date would file real data under a day it didn't come from.
+    """
+    for pattern in DATE_PATTERNS:
+        match = pattern.search(name)
+        if not match:
+            continue
+        year, month, day = match.group(1), match.group(2), match.group(3)
+        if 1970 <= int(year) <= 2999 and 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+            return year, month, day
+    return None
+
+
+def store_path(root, name):
+    """Full path for a file inside a year/month/day store."""
+    parts = date_subdir(name)
+    return os.path.join(root, *parts, name) if parts else os.path.join(root, UNDATED_DIR, name)
 
 
 def read_exactly(stream, length):
@@ -151,8 +179,9 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                 if not name:
                     log(f"{peer}: rejected unsafe filename {raw_name!r}")
                     continue
-                out_path = os.path.join(cfg["outdir"], name)
+                out_path = store_path(cfg["outdir"], name)
                 with lock:
+                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     with open(out_path, "a", encoding="utf-8", newline="") as out:
                         out.write(text + "\n")
                 row_count += 1
@@ -177,19 +206,18 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                     if not name:
                         log(f"{peer}: rejected unsafe filename in FILE, discarded {length} bytes")
                         continue
-                    out_path = os.path.join(cfg["outdir"], name)
+                    out_path = store_path(cfg["outdir"], name)
                     file_count += 1
                 else:
                     name = safe_blob_name(raw)
                     if not name or not cfg.get("blobdir"):
                         log(f"{peer}: rejected BLOB {raw!r}, discarded {length} bytes")
                         continue
-                    day_dir = os.path.join(cfg["blobdir"], blob_subdir(name))
-                    os.makedirs(day_dir, exist_ok=True)
-                    out_path = os.path.join(day_dir, name)
+                    out_path = store_path(cfg["blobdir"], name)
                     blob_count += 1
 
                 with lock:
+                    os.makedirs(os.path.dirname(out_path), exist_ok=True)
                     write_atomic(out_path, content)
 
             else:

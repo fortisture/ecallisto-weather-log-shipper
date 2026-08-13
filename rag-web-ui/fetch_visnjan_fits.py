@@ -41,7 +41,9 @@ def list_day(day):
 
 
 def download(day, names, store):
-    out_dir = os.path.join(store, day.isoformat())
+    # year/month/day, matching the layout the receiver writes into and the
+    # archive's own structure.
+    out_dir = os.path.join(store, f"{day:%Y}", f"{day:%m}", f"{day:%d}")
     os.makedirs(out_dir, exist_ok=True)
 
     fetched = 0

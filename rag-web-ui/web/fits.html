@@ -139,8 +139,8 @@
         </label>
 
         <label class="control control-range">
-          <span>Contrast <em id="contrast-value">1.0</em></span>
-          <input type="range" id="contrast-range" min="0.4" max="4" step="0.1" value="1">
+          <span>Contrast <em id="contrast-value">1.00</em></span>
+          <input type="range" id="contrast-range" min="0.30" max="3.00" step="0.02" value="1.00">
         </label>
 
       </div>
@@ -767,12 +767,21 @@
        * bright end -- a linear multiplier just saturates the burst. */
       const gamma = 1 / contrast;
 
+      /* Which way up? CALLISTO writes row 0 at the HIGH-frequency end
+       * (the frequency table runs 404 -> 45 MHz), and high frequency
+       * belongs at the top of the plot -- so normally no flip is needed.
+       * Don't assume it though: read the actual ordering from the
+       * frequency table and flip only when the file runs low-to-high.
+       * Getting this backwards is especially nasty because the axis
+       * labels still look right, which makes an upside-down spectrogram
+       * look plausible. */
+      const freqs = currentImage.frequencies;
+      const ascending = freqs && freqs.length > 1
+        ? freqs[0] < freqs[freqs.length - 1]
+        : (currentImage.header.CDELT2 || -1) > 0;
+
       for (let y = 0; y < height; y++) {
-        /* FITS row 0 is the bottom of the image and canvas draws top-down;
-         * CALLISTO's frequency also decreases with row index. Flipping
-         * here puts high frequency at the top, as CALLISTO plots are
-         * conventionally shown. */
-        const sourceRow = height - 1 - y;
+        const sourceRow = ascending ? height - 1 - y : y;
         const base = baseline[sourceRow];
 
         for (let x = 0; x < width; x++) {
@@ -1055,7 +1064,7 @@
 
     element("contrast-range").addEventListener("input", event => {
       contrast = Number(event.target.value);
-      setText("contrast-value", contrast.toFixed(1));
+      setText("contrast-value", contrast.toFixed(2));
       drawSpectrogram();
     });
 

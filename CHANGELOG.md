@@ -5,6 +5,31 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [3.2.0] - 2026-08-13
+
+### Changed
+- **Both stores are now laid out year/month/day** (`data/weather/2026/07/08/…`,
+  `data/fits/2025/09/09/…`), mirroring the e-Callisto archive's own
+  structure. A flat folder becomes unusable after a few thousand files;
+  a nested tree can be browsed, backed up and pruned per period. The date
+  is parsed from the filename; files without one go to `undated/` rather
+  than being filed under a guessed date.
+- `migrate_store_layout.py` moves an existing store into the new layout.
+  Dry run by default, never overwrites or deletes.
+- The demo weather fetcher now writes one file per day, matching the real
+  station's daily rotation instead of one monolithic CSV.
+- Contrast slider is finer: 0.02 steps over 0.30–3.00, shown to two
+  decimals (was 0.1 steps).
+
+### Fixed
+- **Spectrograms rendered upside down.** The renderer assumed CALLISTO
+  writes row 0 at the low-frequency end and flipped to compensate; it
+  writes row 0 at the *high*-frequency end, so the flip introduced the
+  error. The axis labels were drawn independently and were correct, which
+  made the wrong image look plausible — 400 MHz printed at the top with
+  45 MHz data beneath it. Orientation is now read from the file's
+  frequency table rather than assumed.
+
 ## [3.1.0] - 2026-08-13
 
 ### Added

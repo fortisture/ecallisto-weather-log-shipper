@@ -119,9 +119,8 @@ def main():
     ap.add_argument("--days", type=int, default=35, help="how many days back to fetch")
     ap.add_argument(
         "--out",
-        default=os.path.join(
-            os.path.dirname(__file__), "..", "data", "weather", "visnjan_weather.csv"
-        ),
+        default=os.path.join(os.path.dirname(__file__), "..", "data", "weather"),
+        help="root of the weather store; files are written to <root>/YYYY/MM/DD/",
     )
     ap.add_argument(
         "--simulate-outage",
@@ -155,18 +154,32 @@ def main():
             f"dropped {before - len(rows)} readings"
         )
 
-    out_path = os.path.abspath(args.out)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    store = os.path.abspath(args.out)
+    header = [
+        "timestamp", "temp_c", "humidity_pct",
+        "pressure_hpa", "wind_speed_kmh", "wind_dir",
+    ]
 
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "timestamp", "temp_c", "humidity_pct",
-            "pressure_hpa", "wind_speed_kmh", "wind_dir",
-        ])
-        writer.writerows(rows)
+    # One file per day, in a year/month/day tree -- the same shape the real
+    # station produces (it rotates its log at UTC midnight) and the same
+    # layout the receiver writes into.
+    by_day = {}
+    for row in rows:
+        day = row[0][:10]                       # "2026-08-13"
+        by_day.setdefault(day, []).append(row)
 
-    print(f"wrote {len(rows)} hourly readings to {out_path}")
+    for day, day_rows in sorted(by_day.items()):
+        year, month, dd = day.split("-")
+        out_dir = os.path.join(store, year, month, dd)
+        os.makedirs(out_dir, exist_ok=True)
+
+        out_path = os.path.join(out_dir, f"visnjan_weather_{year}{month}{dd}.csv")
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(day_rows)
+
+    print(f"wrote {len(rows)} hourly readings across {len(by_day)} day-files under {store}")
     print(f"first: {rows[0]}")
     print(f"last:  {rows[-1]}")
 
