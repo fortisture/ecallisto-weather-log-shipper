@@ -5,6 +5,18 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [2.0.2] - 2026-08-13
+
+### Fixed
+- `windows/receiver.py`: the atomic rename that finalizes a `FILE`
+  message's write (`<file>.csv.tmp` -> `<file>.csv`) could transiently
+  fail on Windows with `PermissionError: [WinError 5] Access is denied`
+  (e.g. antivirus/indexing briefly holding the target open without
+  `FILE_SHARE_DELETE`), stranding the `.tmp` file and silently dropping
+  that update -- there's no application-level ack, so the sender had
+  already considered it delivered. Now retries the rename up to 5 times
+  with a short delay before giving up.
+
 ## [2.0.1] - 2026-08-13
 
 ### Fixed

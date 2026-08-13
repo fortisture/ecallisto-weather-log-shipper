@@ -112,7 +112,20 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                 with lock:
                     with open(tmp_path, "wb") as out:
                         out.write(content)
-                    os.replace(tmp_path, out_path)
+                    # os.replace can transiently fail on Windows with
+                    # "Access is denied" if something else (antivirus,
+                    # indexing) briefly has the target open without
+                    # FILE_SHARE_DELETE -- retry a few times before giving
+                    # up, since there's no application-level ack/retry for
+                    # a sender to fall back on if this silently fails.
+                    for attempt in range(5):
+                        try:
+                            os.replace(tmp_path, out_path)
+                            break
+                        except PermissionError:
+                            if attempt == 4:
+                                raise
+                            time.sleep(0.2)
                 file_count += 1
 
             else:
