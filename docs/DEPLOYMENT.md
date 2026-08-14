@@ -1,254 +1,300 @@
-# Public HTTPS deployment
+# Deployment
 
-How to take this from "works on my PC over the LAN" to "a real HTTPS site
-anyone can reach", running on a dedicated machine.
+Getting the station from "runs on a laptop" to "an Ubuntu server holding
+the archive and serving a public HTTPS site, fed by a Pi on a different
+network".
 
-**Short version:** don't put `server.py` on the internet directly. Bind it
-to localhost and let a reverse proxy handle HTTPS. Of the options below,
-**Cloudflare Tunnel is the one to pick** unless you have a specific reason
-not to.
-
----
-
-## First: decide what is public
-
-Everything under `rag-web-ui/web/` and the whole FITS store becomes
-world-readable. For a science station that is usually the point — but
-decide it deliberately rather than discovering it later.
-
-| Exposed | What it is |
-|---|---|
-| `/` `/power.html` `/fits.html` | The three pages |
-| `/api/**` | All weather, power and FITS index JSON |
-| `/fits/**` | Every stored `.fit.gz`, downloadable |
-
-Secrets (`token.txt`, `*.pem`, `fingerprint.txt`, `config.json`) live
-**outside** the web root and are not served. Keep it that way — never move
-them under `rag-web-ui/web/`.
-
-There is **no login**. If any of this should be private, put access control
-in the proxy (all three options below support it) rather than in
-`server.py`.
+**Constraint this is built around:** the Pi and the server are on separate
+networks, and the only port open on the server is SSH. Nothing here asks
+you to open a data port to the internet.
 
 ---
 
 ## The shape of it
 
 ```
-  Raspberry Pi                Server device               The internet
-  ─────────────               ─────────────               ────────────
+  Raspberry Pi (network A)              Ubuntu server (network B)
+  ────────────────────────              ─────────────────────────
 
-  pi/sender.py  ──TLS 9443──► server.py                        │
-  (weather,                   ├─ receiver  :9443  ◄── keep PRIVATE
-   power, FITS)               └─ web UI  127.0.0.1:8090
-                                        │
-                                        ▼
-                                 reverse proxy  ──HTTPS 443──► visitors
-                                 (TLS + public name)
+  CALLISTO + weather + rails
+            │
+            ▼
+      pi/sender.py  ──►  127.0.0.1:19443
+                              │
+                              │  ssh -L  (port 22 only)
+                              ▼
+                                        127.0.0.1:9443   receiver
+                                                │
+                                                ▼
+                                        data/  (the archive)
+                                                │
+                                                ▼
+                                        127.0.0.1:8090   web UI
+                                                │
+                                                ▼
+                                        reverse proxy ──HTTPS 443──► public
 ```
 
-Two rules:
+Two rules hold the whole design together:
 
-1. **The web port binds to `127.0.0.1`.** Only the proxy can reach it, so
-   nobody can bypass TLS by hitting the plain HTTP port.
-2. **Port 9443 (the Pi receiver) never goes public.** It is protected by
-   cert pinning and a shared token, but it has no business being
-   internet-facing. If the Pi is off-site, join it to the server with
-   Tailscale/WireGuard instead of forwarding the port.
+1. **Nothing binds to a public interface except `sshd`** (and later, the
+   proxy on 443). The receiver and the web server both listen on
+   `127.0.0.1`, so they are unreachable from outside even if the firewall
+   is wrong.
+2. **The Pi connects outward.** It needs no inbound rule, no static IP and
+   no port forwarding on its own network.
+
+### Why still use TLS inside an SSH tunnel?
+
+SSH already encrypts and authenticates the machines. The inner TLS +
+certificate pinning + shared token layer is kept anyway because it answers
+a different question: SSH proves *which machine* connected, the inner layer
+proves *which program* is talking and that it is talking to the right
+receiver. If the tunnel were ever misconfigured to point somewhere else,
+the sender would refuse on the fingerprint check rather than cheerfully
+uploading the archive to a stranger.
 
 ---
 
-## Option A — Cloudflare Tunnel (recommended)
-
-Best for a machine on a home/observatory connection. No port forwarding,
-no static IP, works behind CGNAT, free automatic HTTPS, and your home IP
-address is never exposed.
-
-You need a domain on Cloudflare (you can move an existing one, or buy one
-through them).
+## Part 1 — the server
 
 ```bash
-# on the server device
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-  -o /usr/local/bin/cloudflared
-chmod +x /usr/local/bin/cloudflared
+sudo apt update && sudo apt install -y python3 openssl git
+sudo useradd -m -s /bin/bash dorm          # if it doesn't exist
 
-cloudflared tunnel login                 # opens a browser, pick your domain
-cloudflared tunnel create dorm
-cloudflared tunnel route dns dorm dorm.example.org
+sudo -u dorm git clone https://github.com/fortisture/ecallisto-weather-log-shipper.git /opt/dorm
+cd /opt/dorm
+
+sudo python3 install.py server --user dorm
 ```
 
-`~/.cloudflared/config.yml`:
-
-```yaml
-tunnel: dorm
-credentials-file: /root/.cloudflared/<TUNNEL-ID>.json
-
-ingress:
-  - hostname: dorm.example.org
-    service: http://127.0.0.1:8090
-  - service: http_status:404
-```
+The installer generates the TLS keypair and token, creates the data store,
+writes `dorm-station.service`, starts it, and prints the **token** and
+**fingerprint**. Keep that output — the Pi needs both.
 
 ```bash
-cloudflared service install
-systemctl enable --now cloudflared
+systemctl status dorm-station
+journalctl -u dorm-station -f
 ```
 
-Then run the station server bound to localhost only:
+Firewall: only SSH.
 
 ```bash
-python3 server.py --http-host 127.0.0.1 --http-port 8090
+sudo ufw allow OpenSSH
+sudo ufw enable
+sudo ufw status
 ```
-
-That's it — `https://dorm.example.org` is live with a valid certificate.
-
-To require a login, add Cloudflare Access (free tier) in front of the
-hostname; it handles auth before traffic ever reaches you.
 
 ---
 
-## Option B — Caddy + Let's Encrypt
+## Part 2 — the Pi
 
-Use when you control a public IP and can forward ports 80 and 443 (a VPS,
-or a connection with a static address). Caddy gets and renews certificates
-automatically.
+```bash
+git clone https://github.com/fortisture/ecallisto-weather-log-shipper.git ~/dorm
+cd ~/dorm
+sudo python3 install.py pi
+```
+
+It asks for:
+
+| Prompt | Value |
+|---|---|
+| Server SSH hostname | the server's public name or IP |
+| Server SSH username | `dorm` |
+| Weather CSV directory | wherever the station writes them |
+| FITS directory | wherever CALLISTO writes them |
+| Token / fingerprint | from Part 1 |
+
+It generates an SSH key, installs the sender, writes both services, and
+prints the **public key**.
+
+### Authorise the key (on the server)
+
+Paste the printed key, but restrict what it can do:
+
+```bash
+sudo -u dorm mkdir -p /home/dorm/.ssh
+sudo -u dorm nano /home/dorm/.ssh/authorized_keys
+```
+
+Prefix the key line with:
+
+```
+command="",no-agent-forwarding,no-pty,no-X11-forwarding,permitopen="127.0.0.1:9443" ssh-ed25519 AAAA... dorm-tunnel@pi
+```
+
+That key can now open exactly one forward and nothing else — **no shell**,
+even if the Pi is stolen. This is the single most valuable line in this
+document.
+
+```bash
+sudo chmod 600 /home/dorm/.ssh/authorized_keys
+sudo chown -R dorm:dorm /home/dorm/.ssh
+```
+
+### Start it
+
+```bash
+sudo systemctl enable --now dorm-tunnel dorm-sender
+systemctl status dorm-tunnel dorm-sender
+journalctl -u dorm-sender -f
+```
+
+You should see `connected to 127.0.0.1:19443, fingerprint verified,
+authenticated`, then rows and spectrograms shipping.
+
+### If the tunnel will not come up
+
+```bash
+# Test the SSH leg by hand, as the service user:
+sudo -u pi ssh -i /home/pi/.ssh/dorm_tunnel -N -v \
+    -L 19443:127.0.0.1:9443 dorm@SERVER
+```
+
+- `Permission denied` → the key is not in `authorized_keys`, or its
+  permissions are wrong (`700` on `.ssh`, `600` on the file).
+- `administratively prohibited: open failed` → `permitopen` does not match
+  `127.0.0.1:9443`.
+- Connects but the sender still fails → the receiver is not running; check
+  `journalctl -u dorm-station`.
+
+---
+
+## Part 3 — public HTTPS
+
+The site listens on `127.0.0.1:8090`. Put a proxy in front of it.
+
+### Caddy (recommended — certificates are automatic)
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+```
 
 `/etc/caddy/Caddyfile`:
 
 ```
 dorm.example.org {
     reverse_proxy 127.0.0.1:8090
-
     encode gzip
 
     # Optional: password-protect the whole site.
     # Generate the hash with:  caddy hash-password
     # basic_auth {
-    #     roko $2a$14$...
+    #     visnjan $2a$14$...
     # }
 }
 ```
 
 ```bash
+sudo ufw allow 80,443/tcp
 sudo systemctl reload caddy
 ```
 
-Requirements:
-- DNS `A`/`AAAA` record for `dorm.example.org` pointing at your public IP.
-- Router forwards **443 and 80** to the server device (80 is used for the
-  certificate challenge and the HTTP→HTTPS redirect).
-- Dynamic IP? Add a DDNS updater, or use Option A instead.
+Requirements: a DNS `A`/`AAAA` record pointing at the server, and ports 80
+and 443 reachable (80 is used for the certificate challenge).
 
-nginx works equally well if you prefer it — the difference is you manage
-certbot yourself instead of Caddy doing it silently.
+**If you cannot open 443 either**, the only remaining option is an outbound
+tunnel such as Cloudflare Tunnel, which makes an outbound connection
+instead of accepting an inbound one. That means running a third-party agent
+on the server — a trade-off worth making deliberately, not by default.
 
----
+### nginx
 
-## Option C — VPS, with the station pushing to it
+Equivalent, but you manage certbot yourself:
 
-Cleanest separation if the observatory's connection is unreliable: rent a
-small VPS (a €4/month box is plenty), run `server.py` + Caddy there, and
-have the Pi ship to it.
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name dorm.example.org;
 
-The only change is the Pi's `config.json`:
+    ssl_certificate     /etc/letsencrypt/live/dorm.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dorm.example.org/privkey.pem;
 
-```json
-{
-  "host": "vps.example.org",
-  "port": 9443,
-  "token": "…",
-  "fingerprint": "…"
+    location / {
+        proxy_pass http://127.0.0.1:8090;
+        proxy_set_header Host $host;
+    }
 }
 ```
 
-Since the data now crosses the public internet rather than a LAN:
+---
 
-- The existing TLS + cert pinning + token is doing real work here. Keep the
-  token long and random.
-- Firewall 9443 to the Pi's IP if it is static:
-  `ufw allow from <PI-IP> to any port 9443 proto tcp`
-- If the Pi's IP changes, put both machines on Tailscale and point the Pi
-  at the VPS's Tailscale address instead — then 9443 needs no public
-  exposure at all.
+## What is exposed
+
+Everything under `web/` and the whole FITS archive becomes world-readable.
+For a science station that is usually the intent — but decide it
+deliberately.
+
+| Path | Contents |
+|---|---|
+| `/`, `/weather.html`, … | the pages |
+| `/api/**` | all weather, power, status, sun and index JSON |
+| `/fits/**` | every stored `.fit.gz`, downloadable |
+
+Secrets live in `secrets/`, outside the web root, and are gitignored. Never
+move them under `web/`.
+
+There is **no login**. If any of this should be private, put access control
+in the proxy — all the options above support it.
+
+### Already hardened
+
+`station/server.py` sets `Content-Security-Policy`,
+`X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` on every
+response, refuses directory listings, and rejects path traversal under
+`/fits/`:
+
+```
+GET /api/                  -> 404
+GET /fits/                 -> 404
+GET /fits/../../server.py  -> 404
+```
+
+### Not hardened
+
+- **No rate limiting.** The FITS archive is the exposure — someone could
+  pull every file in a loop. Add a limit in the proxy if the archive grows.
+- **`ThreadingHTTPServer`** is fine behind a proxy that terminates TLS and
+  buffers slow clients; do not expose it directly.
 
 ---
 
-## Running it as a service (Linux server device)
+## Moving the archive
 
-`/etc/systemd/system/dorm-station.service`:
-
-```ini
-[Unit]
-Description=DORM station server
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=dorm
-WorkingDirectory=/opt/dorm
-ExecStart=/usr/bin/python3 /opt/dorm/server.py \
-    --http-host 127.0.0.1 \
-    --http-port 8090 \
-    --data-dir /var/lib/dorm
-Restart=always
-RestartSec=5
-
-# The server only ever needs to read its code and write its data.
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/dorm
-
-[Install]
-WantedBy=multi-user.target
-```
+The repo carries no data, so moving machines is just:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now dorm-station
+rsync -avz --progress /opt/dorm/data/ dorm@newserver:/opt/dorm/data/
+```
+
+If you skip it, the Pi's six-hour failsafe resync refills the server on its
+own — it periodically forgets what it believes was delivered and re-sends,
+precisely so a rebuilt server heals itself.
+
+---
+
+## Routine operation
+
+```bash
+# Server
+systemctl status dorm-station
 journalctl -u dorm-station -f
+python3 install.py check
+
+# Pi
+systemctl status dorm-tunnel dorm-sender
+journalctl -u dorm-sender -f
+
+# Restart everything after a config change
+sudo systemctl restart dorm-station          # server
+sudo systemctl restart dorm-tunnel dorm-sender   # Pi
 ```
 
----
-
-## Moving from this PC to the real server
-
-1. `git clone` the repo onto the new machine. **The repo has no data and no
-   secrets in it** — that is deliberate, and it makes this step trivial.
-2. Generate fresh TLS material there (`windows/install_and_run.ps1` on
-   Windows, or `openssl req -x509 -newkey rsa:2048 -sha256 -days 3650
-   -nodes -keyout key.pem -out cert.pem -subj "/CN=dorm-receiver"` on
-   Linux). **Generate a new token too** — don't copy this proof-of-concept
-   one across.
-3. Put the new fingerprint and token into the Pi's `config.json` and
-   restart `weather-shipper` on the Pi.
-4. Copy `data/` over if you want the history; otherwise the Pi's 6-hour
-   failsafe resync will refill it on its own.
-5. Point the proxy at it and you're done.
-
----
-
-## What is already hardened
-
-`server.py` sets `Content-Security-Policy`, `X-Content-Type-Options`,
-`X-Frame-Options` and `Referrer-Policy` on every response, refuses
-directory listings, and rejects path traversal under `/fits/`. Verified:
-
-```
-GET /api/                  -> 404   (no listing)
-GET /fits/                 -> 404   (no listing)
-GET /fits/../../server.py  -> 404   (traversal blocked)
-```
-
-## What is not
-
-- **No rate limiting.** The FITS store is the exposure — someone could pull
-  every `.fit.gz` in a loop. All three proxy options can rate-limit; use it
-  if the archive gets large.
-- **No authentication**, by design (see the top of this file).
-- **The HTTP server is Python's `ThreadingHTTPServer`.** Fine behind a
-  proxy handling TLS and buffering slow clients; not something to expose
-  raw.
+The **Status** page is the fastest check that it is all working: if the
+instrument stream shows anything other than ONLINE, data has stopped
+arriving regardless of what the services claim.
