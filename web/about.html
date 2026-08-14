@@ -175,8 +175,7 @@
           <div class="person-role">Mentor · Founder</div>
           <div class="person-name">Matej Marković</div>
           <div class="person-cred">
-            student zrakoplovnog inženjerstva
-            <span>Aeronautical Engineering</span>
+            Aeronautical Engineering student
           </div>
           <div class="person-bio">
             Co-builder of the station. Working alongside Marko Radolović
@@ -251,56 +250,38 @@
 
 
 
-    <!-- ================= CONTACT ================= -->
 
-    <section class="panel" style="margin-top:18px;">
+
+
+    <!-- ================= STATION LOG ================= -->
+
+    <section class="panel" id="log" style="margin-top:18px;">
       <div class="panel-head">
-        <span class="label">Contact</span>
-        <span class="tag">STATION DETAILS</span>
+        <span class="label">Station Log</span>
+        <span class="tag" id="blog-tag">—</span>
       </div>
 
-      <div class="contact-grid">
+      <div class="explain-body">
+        Notes on running the station. <strong>Instrument</strong> posts cover
+        the hardware and cite the
+        <a href="https://www.e-callisto.org/Journal.html" rel="noopener noreferrer"
+           target="_blank">e-Callisto network journal</a> where the network
+        recorded them. <strong>Software</strong> posts explain how the
+        monitoring works, and <strong>the project</strong> is about how the
+        work gets done and why.
+      </div>
 
-        <div class="contact-item">
-          <div class="ci-label">Station code</div>
-          <div class="ci-value">Croatia-Visnjan</div>
+      <div class="blog-body">
+        <div class="blog-filter" id="blog-filter">
+          <button type="button" class="range-btn is-active" data-kind="all">ALL</button>
+          <button type="button" class="range-btn" data-kind="station">INSTRUMENT</button>
+          <button type="button" class="range-btn" data-kind="software">SOFTWARE</button>
+          <button type="button" class="range-btn" data-kind="story">THE PROJECT</button>
         </div>
 
-        <div class="contact-item">
-          <div class="ci-label">Coordinates</div>
-          <div class="ci-value">45.2775°N&nbsp; 13.7261°E</div>
-        </div>
-
-        <div class="contact-item">
-          <div class="ci-label">Network</div>
-          <div class="ci-value">
-            <a href="https://www.e-callisto.org/" rel="noopener noreferrer" target="_blank">e-Callisto</a>
-          </div>
-        </div>
-
-        <div class="contact-item">
-          <div class="ci-label">Observatory</div>
-          <div class="ci-value">
-            <a href="https://en.astro.hr/" rel="noopener noreferrer" target="_blank">astro.hr</a>
-          </div>
-        </div>
-
-        <div class="contact-item">
-          <div class="ci-label">Email</div>
-          <div class="ci-value" data-editable="contact-email">to be added</div>
-        </div>
-
-        <div class="contact-item">
-          <div class="ci-label">Source code</div>
-          <div class="ci-value">
-            <a href="https://github.com/fortisture/ecallisto-weather-log-shipper"
-               rel="noopener noreferrer" target="_blank">GitHub</a>
-          </div>
-        </div>
-
+        <ol class="blog-list" id="blog-list"></ol>
       </div>
     </section>
-
 
     <footer class="page-footer">
       DORM GROUND SUPPORT · VIŠNJAN OBSERVATORY · e-CALLISTO STATION CROATIA-VISNJAN
@@ -388,9 +369,170 @@
   }
 
 
+
+  /* ---------------- station log ----------------
+   * A normal blog index: each post shows its title, date and a one-line
+   * summary, and opens to reveal the article. Built on <details>, so it
+   * works with the keyboard and without JavaScript having to manage any
+   * open/closed state itself.
+   *
+   * Opening a post also writes its id into the URL, so a specific post can
+   * be linked to and arrives already open.
+   */
+  const BLOG_URL = "./api/blog.json";
+
+  let blogPosts = [];
+  let blogFilter = "all";
+
+  const KIND_LABEL = {
+    station: "Instrument",
+    software: "Software",
+    story: "The project"
+  };
+
+  const MONTHS = ["January", "February", "March", "April", "May", "June",
+                  "July", "August", "September", "October", "November", "December"];
+
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    return Number(d) + " " + MONTHS[Number(m) - 1] + " " + y;
+  }
+
+  /* A stable id from date + title, so links keep working when posts are
+   * added above them. */
+  function postId(post) {
+    return post.date + "-" + (post.title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40);
+  }
+
+
+  function renderBlog() {
+    const list = DORM.el("blog-list");
+    const shown = blogPosts.filter(p => blogFilter === "all" || p.kind === blogFilter);
+
+    if (!shown.length) {
+      list.innerHTML = '<li class="blog-empty">No entries.</li>';
+      return;
+    }
+
+    const openId = (location.hash || "").replace("#post-", "");
+
+    list.innerHTML = shown.map(post => {
+      const id = postId(post);
+      const paras = Array.isArray(post.body) ? post.body : (post.body ? [post.body] : []);
+
+      const quote = post.quote
+        ? "<blockquote>" + escapeHtml(post.quote) +
+          (post.source
+            ? "<cite>" +
+                (post.source_url
+                  ? '<a href="' + post.source_url + '" rel="noopener noreferrer" ' +
+                    'target="_blank">' + escapeHtml(post.source) + "</a>"
+                  : escapeHtml(post.source)) +
+              "</cite>"
+            : "") +
+          "</blockquote>"
+        : "";
+
+      const sourceLine = (!post.quote && post.source)
+        ? '<p class="bp-source">Source: ' +
+            (post.source_url
+              ? '<a href="' + post.source_url + '" rel="noopener noreferrer" ' +
+                'target="_blank">' + escapeHtml(post.source) + "</a>"
+              : escapeHtml(post.source)) +
+          "</p>"
+        : "";
+
+      const tags = (post.tags || []).length
+        ? '<div class="bp-tags">' +
+            post.tags.map(t => '<span class="bp-tag">' + escapeHtml(t) + "</span>").join("") +
+          "</div>"
+        : "";
+
+      return "<li>" +
+        '<details class="blog-post is-' + (post.kind || "station") + '" ' +
+                 'id="post-' + id + '"' + (id === openId ? " open" : "") + ">" +
+          "<summary>" +
+            '<span class="bp-kind">' + (KIND_LABEL[post.kind] || post.kind) + "</span>" +
+            '<h3 class="bp-title">' + escapeHtml(post.title || "") + "</h3>" +
+            '<div class="bp-byline"><time datetime="' + post.date + '">' +
+              formatDate(post.date) + "</time></div>" +
+            (post.summary
+              ? '<p class="bp-summary">' + escapeHtml(post.summary) + "</p>"
+              : "") +
+            '<span class="bp-more">Read the post</span>' +
+          "</summary>" +
+          '<div class="bp-body">' +
+            paras.map(t => "<p>" + escapeHtml(t) + "</p>").join("") +
+            quote + sourceLine + tags +
+          "</div>" +
+        "</details>" +
+      "</li>";
+    }).join("");
+
+    /* Keep the URL pointing at whichever post is open, so it can be
+     * copied and shared. Closing the last one clears it again. */
+    list.querySelectorAll("details").forEach(node => {
+      node.addEventListener("toggle", () => {
+        if (node.open) {
+          history.replaceState(null, "", "#" + node.id);
+        }
+        else if (location.hash === "#" + node.id) {
+          history.replaceState(null, "", location.pathname);
+        }
+      });
+    });
+  }
+
+
+  async function loadBlog() {
+    try {
+      const feed = await DORM.getJSON(BLOG_URL);
+      blogPosts = feed.posts || [];
+      DORM.setText("blog-tag", blogPosts.length + " POSTS");
+      renderBlog();
+
+      /* Arriving on a link to a specific post should scroll to it. */
+      if (location.hash.startsWith("#post-")) {
+        const target = document.getElementById(location.hash.slice(1));
+        if (target) target.scrollIntoView({ block: "start" });
+      }
+    }
+    catch (e) {
+      console.warn("[DORM] station log unavailable", e.message);
+      DORM.setText("blog-tag", "UNAVAILABLE");
+      DORM.el("blog-list").innerHTML =
+        '<li class="blog-empty">The station log needs the server running.</li>';
+    }
+  }
+
+
+  DORM.el("blog-filter").querySelectorAll(".range-btn").forEach(button => {
+    button.addEventListener("click", () => {
+      DORM.el("blog-filter").querySelectorAll(".range-btn")
+        .forEach(b => b.classList.remove("is-active"));
+      button.classList.add("is-active");
+      blogFilter = button.dataset.kind;
+      renderBlog();
+    });
+  });
+
+
   DORM.renderNav("about.html");
   loadCounters();
   loadGallery();
+  loadBlog();
   </script>
 
 </body>

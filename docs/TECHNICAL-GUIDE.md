@@ -876,8 +876,8 @@ question, and they deliberately do not overlap.
 | **Status** | Is the station actually recording, and how much has it missed? |
 | **Sun** | When is the sun up, today and across the year? |
 | **Spectrograms** | What did the instrument see? |
-| **Log** | What has happened to this station? |
-| **About** | What is this, and who built it? |
+| **About** | What is this, who built it, and what has happened to it? |
+| **Contact** | How do I reach someone, and where is the data? |
 
 ### Overview — the landing page
 
@@ -927,14 +927,29 @@ Accuracy is a few minutes. The algorithm ignores terrain, so a hill on the
 horizon will always delay real sunrise past the computed one — worth
 knowing before treating it as gospel.
 
-### Log — two kinds of history
+### The station log, on the About page
 
 Posts are prose, written by hand in `web/blog/posts.json`. Instrument
 posts quote the e-Callisto network journal and link the original entry, so
-a reader can check the claim. Software posts explain how the monitoring
-works. `CHANGELOG.md` is still the machine-readable record of every
-version, but it is not rendered here: a reader wants two articles, not
-eleven version bumps.
+a reader can check the claim rather than taking the site's word for it.
+Software posts explain how the monitoring works. `CHANGELOG.md` remains the
+machine-readable record of every version, but it is not rendered here: a
+reader wants two articles, not eleven version bumps.
+
+The list behaves like a normal blog index — title, date and a one-line
+summary — and a post opens to reveal the article. That is a `<details>`
+element rather than a JavaScript show/hide, which means it is keyboard
+operable and screen-reader announced for free, and there is no open/closed
+state for the code to get wrong. Opening a post writes its id into the URL,
+so a specific post can be linked to and arrives already open.
+
+### Contact — deliberately separate
+
+Contact details were originally the last section of About. That is the one
+thing a visitor is most likely to be hunting for, and it was at the bottom
+of the longest page on the site. It is now its own tab, and carries the
+station's formal details as well — code, coordinates, instrument, first
+light — so anyone citing the station has them in one place.
 
 ---
 

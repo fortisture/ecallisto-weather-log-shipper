@@ -92,7 +92,7 @@
     <section class="panel">
 
       <div class="panel-head">
-        <span class="label">Sweeps · <span id="selected-day">—</span></span>
+        <span class="label">Spectrograms · <span id="selected-day">—</span></span>
         <span class="tag" id="sweep-count">—</span>
       </div>
 
@@ -146,7 +146,7 @@
       <div class="spectrogram-body">
         <canvas id="spectrogram"></canvas>
         <div id="spectrogram-note" class="spectrogram-note">
-          No sweep loaded.
+          No spectrogram loaded.
         </div>
       </div>
 
@@ -170,7 +170,7 @@
      * ============================================================
      *
      * Reads /api/fits/index.json (written by server.py) to learn
-     * which days and sweeps exist locally, then decodes the
+     * which days and spectrograms exist locally, then decodes the
      * selected .fit.gz entirely in the browser:
      *
      *   gzip -> FITS header parse -> 8-bit image -> canvas
@@ -368,11 +368,11 @@
         button.innerHTML =
           '<span class="day-date">' + day.date.slice(8) + "</span>" +
           '<span class="day-meta">' +
-          (day.available ? day.count + " sweeps" : "no data") +
+          (day.available ? day.count + " spectrograms" : "no data") +
           "</span>";
 
         button.title = day.available
-          ? day.date + " — " + day.count + " sweeps recorded"
+          ? day.date + " — " + day.count + " spectrograms recorded"
           : day.date + " — data not available (station not recording)";
 
         if (day.available) {
@@ -400,13 +400,13 @@
 
       const files = (indexData.days || {})[dateKey] || [];
       setText("selected-day", dateKey);
-      setText("sweep-count", files.length + " SWEEPS");
+      setText("sweep-count", files.length + " SPECTROGRAMS");
 
       const strip = element("sweep-strip");
       strip.innerHTML = "";
 
       if (!files.length) {
-        strip.innerHTML = '<span class="empty-note">No sweeps for this day.</span>';
+        strip.innerHTML = '<span class="empty-note">No spectrograms for this day.</span>';
         return;
       }
 
@@ -1116,7 +1116,7 @@
 
   </script>
 
-  <script>DORM.renderNav("web\fits.html");</script>
+  <script>DORM.renderNav("fits.html");</script>
 </body>
 
 </html>

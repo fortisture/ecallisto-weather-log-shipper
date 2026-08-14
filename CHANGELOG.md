@@ -5,6 +5,31 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.4.0] - 2026-08-14
+
+### Changed
+- **Contact is its own page.** It was a section at the foot of About, which
+  buried the one thing a visitor is most likely to be looking for. It now
+  carries enquiries, the station's formal details (code, coordinates,
+  instrument, first light) and where to find both the data and the code.
+- **The Station Log moved into About**, where it reads as that page's
+  history rather than a separate destination.
+- **Log posts open and close.** The list shows title, date and a one-line
+  summary; clicking opens the article. Built on `<details>`, so it works
+  with the keyboard and needs no JavaScript to track state, and opening a
+  post writes its id into the URL so a single post can be linked to and
+  arrives already open.
+- "Sweeps" is now "spectrograms" throughout the interface. A *spectrograph*
+  is the instrument; a *spectrogram* is the image it produces, which is
+  what these files are — and what the navigation has always called them.
+- Matej Marković's field is now given in English rather than Croatian.
+
+### Fixed
+- Three pages did not highlight their own navigation tab. An earlier bulk
+  path rename had left `renderNav("web\fits.html")`, where `\f` is a
+  form-feed escape in JavaScript, so the filename never matched and the
+  active state silently never applied.
+
 ## [4.3.0] - 2026-08-14
 
 ### Changed

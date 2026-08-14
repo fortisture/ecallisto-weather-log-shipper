@@ -79,7 +79,7 @@
       <section class="panel chart-panel">
         <div class="panel-head">
           <span class="label">CALLISTO Coverage</span>
-          <span class="tag">% OF 96 DAILY SWEEPS</span>
+          <span class="tag">% OF 96 DAILY SPECTROGRAMS</span>
         </div>
         <div class="chart-body">
           <canvas id="fits-chart"></canvas>
@@ -270,7 +270,7 @@
       else if (e.coverage_pct > 0) level = 1;
 
       return '<span class="heat-cell heat-' + level + '" title="' +
-        e.date + " — " + e.count + " / " + e.expected + " sweeps (" +
+        e.date + " — " + e.count + " / " + e.expected + " spectrograms (" +
         e.coverage_pct + '%)"></span>';
     }).join("");
 

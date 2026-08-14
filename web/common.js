@@ -37,9 +37,9 @@ const DORM = (function () {
    * they can never be mistaken for a series. */
   const REFERENCE_LINE = "#8FA0B3";
 
-  /* Instrument pages on the left, About pushed to the right: it is about
-   * the project rather than the data, so grouping it with the live tabs
-   * would suggest it is another readout. */
+  /* Instrument pages on the left; About and Contact pushed to the right.
+   * Those two are about the project rather than the data, so grouping them
+   * with the live tabs would suggest they are more readouts. */
   const NAV = [
     { href: "./index.html", label: "Overview" },
     { href: "./weather.html", label: "Weather" },
@@ -47,8 +47,8 @@ const DORM = (function () {
     { href: "./status.html", label: "Status" },
     { href: "./sun.html", label: "Sun" },
     { href: "./fits.html", label: "Spectrograms" },
-    { href: "./blog.html", label: "Log", side: "right" },
-    { href: "./about.html", label: "About", side: "right" }
+    { href: "./about.html", label: "About", side: "right" },
+    { href: "./contact.html", label: "Contact", side: "right" }
   ];
 
 
