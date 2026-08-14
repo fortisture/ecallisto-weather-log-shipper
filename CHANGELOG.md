@@ -5,6 +5,23 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.3.0] - 2026-08-14
+
+### Changed
+- **Technical guide brought up to date with v4.** It still described the
+  original one-LAN, Windows-PC arrangement and the pre-restructure file
+  layout. Rewrites the summary, the system overview and the rationale;
+  updates every path; documents the four pages added since; and explains
+  why the API is split into pre-computed ranges.
+- New section **"How the data actually crosses, over SSH"** — a
+  step-by-step account of the tunnel: what each field of `-L` means and
+  which machine resolves it, the five hops a single row takes, why the
+  data is encrypted twice and what the inner layer protects against, how
+  the key is restricted in `authorized_keys`, and what happens when the
+  link drops.
+- Records six further defects, including the twelve-hour solar-time error,
+  the over-broad `header` selector, and the three accessibility failures.
+
 ## [4.2.0] - 2026-08-14
 
 ### Changed

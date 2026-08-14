@@ -14,6 +14,7 @@ with files and networking is assumed; nothing beyond that.
 | **Instruments** | CALLISTO spectrometer, BME environmental sensor, weather station |
 | **Repository** | <https://github.com/fortisture/ecallisto-weather-log-shipper> |
 | **Deployment** | See [DEPLOYMENT.md](DEPLOYMENT.md) |
+| **Design baseline** | See [DESIGN-BASELINE.md](DESIGN-BASELINE.md) |
 
 ---
 
@@ -22,12 +23,14 @@ with files and networking is assumed; nothing beyond that.
 1. [Summary](#1-summary)
 2. [Rationale](#2-rationale)
 3. [System overview](#3-system-overview)
+3b. [How the data crosses, over SSH](#3b-how-the-data-actually-crosses-over-ssh)
 4. [The sender (Raspberry Pi)](#4-the-sender-raspberry-pi)
 5. [The receiver (server)](#5-the-receiver-server)
 6. [Security model](#6-security-model)
 7. [The station server](#7-the-station-server)
 8. [Data preparation: CSV to JSON](#8-data-preparation-csv-to-json)
 9. [The weather dashboard](#9-the-weather-dashboard)
+9c. [The other pages](#9c-the-other-pages)
 10. [The power dashboard](#10-the-power-dashboard)
 11. [The spectrogram viewer](#11-the-spectrogram-viewer)
 12. [Supporting scripts](#12-supporting-scripts)
@@ -40,15 +43,26 @@ with files and networking is assumed; nothing beyond that.
 
 ## 1. Summary
 
-A Raspberry Pi at the Višnjan observatory records weather readings into CSV
-files and solar radio spectrograms into FITS files. A program on the Pi
-(`sender.py`) watches those weather files and, the moment a new line is
-written, sends that line over an encrypted connection to your Windows PC. A
-program on the PC (`server.py`) receives those lines, saves them to its own
-local copy, converts them into a format a webpage can read, and serves a
-website that displays it all as charts. A second page on that website reads
-the FITS spectrogram files and draws them as images. The PC keeps its own
-copy of everything, so the website works even when the Pi is switched off.
+A Raspberry Pi at the Višnjan observatory records three things: weather
+readings, the electrical draw of each subsystem, and solar radio
+spectrograms from the CALLISTO receiver. A program on the Pi
+(`pi/sender.py`) watches those files and, the moment anything changes,
+sends the change to a server — through an SSH tunnel, because the two
+machines are on different networks and the server has only port 22 open.
+
+On the server, `station/server.py` receives everything, files it into its
+own archive, converts it into JSON a browser can read, and serves the
+website. That server holds a complete independent copy, so the site keeps
+working when the Pi is switched off, and the Pi's SD card stops being the
+only place any of this exists.
+
+The website is eight pages: an overview with the sun's position, the
+weather, the power rails, whether the station is actually recording, the
+solar ephemeris, the spectrograms themselves (decoded in the browser), a
+log of what has happened to the station, and an about page.
+
+Everything is dependency-free Python and static HTML. There is nothing to
+install, no database, and no build step.
 
 ---
 
@@ -64,8 +78,9 @@ there alone presents three problems:
 3. **Capacity.** Serving a charting web application competes with the
    instrument duties the Pi already performs.
 
-The system therefore replicates data off the Pi continuously to a machine
-with durable storage, and performs all presentation work there.
+The system therefore replicates data off the Pi continuously to a server
+with durable storage — which need not be anywhere near the observatory —
+and performs all presentation work there.
 
 **Continuously** is the operative constraint: every row is transmitted
 within seconds of being written, not batched daily or on demand.
@@ -74,44 +89,211 @@ within seconds of being written, not batched daily or on demand.
 
 ## 3. System overview
 
-```
-   RASPBERRY PI (at the observatory)         WINDOWS PC (your machine)
-   ─────────────────────────────────         ─────────────────────────
+The Raspberry Pi sits at the telescope. The server is somewhere else
+entirely — a different building, a different network, a different city if
+you like. They are connected by nothing more than SSH.
 
-   weather logger writes CSV rows
+```
+   RASPBERRY PI (at the telescope)          UBUNTU SERVER (elsewhere)
+   ───────────────────────────────          ─────────────────────────
+
+   CALLISTO writes spectrograms
+   sensors write weather + power
               │
               ▼
    ┌──────────────────────┐                 ┌────────────────────────┐
-   │  pi/sender.py        │                 │  server.py             │
-   │                      │   encrypted     │                        │
-   │  • watches the files │───────────────► │  • receives rows       │
-   │  • notices changes   │   TLS over      │  • saves to data/      │
-   │  • sends what's new  │   your LAN      │  • rebuilds the JSON   │
-   │  • remembers where   │   port 9443     │  • serves the website  │
+   │  pi/sender.py        │                 │  station/server.py     │
+   │                      │                 │                        │
+   │  • watches the files │                 │  • receives everything │
+   │  • notices changes   │                 │  • saves to data/      │
+   │  • sends what's new  │                 │  • rebuilds the JSON   │
+   │  • remembers where   │                 │  • serves the website  │
    │    it got to         │                 │                        │
-   └──────────────────────┘                 └───────────┬────────────┘
+   └──────────┬───────────┘                 └───────────┬────────────┘
+              │                                         │
+              │ connects to its OWN machine             │ listens on its
+              ▼                                         ▼ OWN loopback
+        127.0.0.1:19443                           127.0.0.1:9443
+              │                                         ▲
+              │        ┌──────────────────────┐         │
+              └───────►│ SSH tunnel, port 22  ├─────────┘
+                       └──────────────────────┘
+                         the only open port
                                                         │
                                                         ▼
                                             ┌────────────────────────┐
-                                            │  your web browser      │
-                                            │  localhost:8090        │
-                                            │                        │
-                                            │  • weather charts      │
-                                            │  • spectrogram viewer  │
+                                            │  reverse proxy :443    │
+                                            │  the public website    │
                                             └────────────────────────┘
 ```
 
-Four principles govern the design:
+Five principles govern the design:
 
 - **The Pi pushes; it is never polled.** A row is transmitted as soon as it
-  appears.
+  appears. The server never has to reach back to the Pi, which means the Pi
+  needs no inbound firewall rule, no static address, and no port forwarding
+  on its own network.
 - **The server holds an independent copy.** Received data lives in `data/`
   and does not depend on the Pi remaining reachable; the site continues to
-  serve history if the Pi is offline.
+  serve history if the Pi is switched off.
+- **Nothing listens on a public interface except `sshd`.** The receiver and
+  the web server both bind to `127.0.0.1`, so they are unreachable from
+  outside even if the firewall is misconfigured.
 - **The web layer reads files, not a database.** Nothing to install,
   configure, back up, or corrupt.
 - **No third-party dependencies.** Both programs use only the Python
   standard library, so an OS or package upgrade cannot break them.
+
+---
+
+## 3b. How the data actually crosses, over SSH
+
+This is the part that surprises people, so it is worth going slowly.
+
+**No data port is open on the server.** Port 9443, where the receiver
+listens, is bound to the server's own loopback address — the network
+equivalent of a room with no external door. Yet the Pi, on a completely
+different network, delivers into it.
+
+### The one command that does it
+
+On the Pi, a service runs this and nothing else:
+
+```bash
+ssh -N -L 19443:127.0.0.1:9443 dorm@server.example.org
+```
+
+Read `-L 19443:127.0.0.1:9443` as three separate things:
+
+| Part | Meaning |
+|---|---|
+| `19443` | Open a listening port **on the Pi**, numbered 19443 |
+| `127.0.0.1` | Anything arriving there should be delivered to this address… |
+| `9443` | …on this port — **as resolved from the server's point of view** |
+
+That middle field is the whole trick. `127.0.0.1` is not evaluated on the
+Pi. It is sent across and evaluated *on the server*, where it means the
+server's own loopback. The Pi has effectively borrowed a door into a room
+that has no outside entrance.
+
+`-N` means "do not run a command" — this SSH session exists purely to carry
+the forward, and never gets a shell.
+
+### Following one row of weather data
+
+Suppose the weather logger appends a line. Every step it takes:
+
+1. **`sender.py` opens an ordinary TCP connection to `127.0.0.1:19443`.**
+   As far as the program is concerned, the receiver is running on the same
+   machine. It has no idea a network is involved. This is why the sender
+   contains no code about tunnels at all — the complexity lives entirely in
+   the SSH configuration, not in the application.
+
+2. **The SSH client on the Pi accepts that connection** and opens a
+   *channel* inside the SSH session it already holds open.
+
+3. **The bytes are encrypted and multiplexed** into the single TCP stream
+   SSH maintains to the server on **port 22**. To anyone watching the
+   network — the observatory's ISP, a hotel Wi-Fi, anyone in between — it is
+   indistinguishable from somebody typing in a terminal.
+
+4. **`sshd` on the server receives the stream,** recognises the channel, and
+   opens its own TCP connection to `127.0.0.1:9443`.
+
+5. **`receiver.py` accepts it.** From its point of view something on the
+   local machine connected. It does not know, and does not need to know,
+   that the other end is in another country.
+
+The connection is now a plain pipe between the two programs. Every byte
+either one writes travels steps 1–5, and replies travel them in reverse.
+
+### Then a second lock, inside the first
+
+Once that pipe exists, the two programs run their own handshake through it,
+exactly as they did before any tunnel existed:
+
+```
+sender.py                                        receiver.py
+    │                                                 │
+    │ ── TLS handshake ─────────────────────────────► │
+    │ ◄──────────────── server certificate ────────── │
+    │                                                 │
+    │  hash the certificate, compare against the      │
+    │  fingerprint in config.json                     │
+    │  MISMATCH -> hang up, send nothing              │
+    │                                                 │
+    │ ── AUTH <shared token> ──────────────────────►  │
+    │ ◄──────────────── OK   (or DENY, and close) ─── │
+    │                                                 │
+    │ ── ROW  weather_20260814.csv <the row> ──────►  │
+    │ ── BLOB Croatia-Visnjan_….fit.gz 190482 ─────►  │
+    │    <190482 raw bytes>                           │
+```
+
+The data is therefore encrypted twice. That is deliberate rather than
+paranoid, because the two layers answer different questions:
+
+| Layer | Answers |
+|---|---|
+| **SSH** | *Which machine is this?* — proven by the Pi's private key |
+| **TLS + pinning + token** | *Which program is this, and am I talking to the right receiver?* |
+
+Consider what the inner layer protects against. Suppose someone changes the
+tunnel to point at a machine of their own. SSH would be perfectly content —
+it authenticated correctly, to the wrong destination. The sender then
+compares that machine's certificate against the pinned fingerprint, finds it
+does not match, and refuses to send a single byte. Without the inner layer
+the archive would quietly upload itself to a stranger and nothing would look
+wrong.
+
+### Locking the key down
+
+The Pi's public key goes in the server's `authorized_keys`, and it should be
+restricted:
+
+```
+command="",no-agent-forwarding,no-pty,permitopen="127.0.0.1:9443" ssh-ed25519 AAAA...
+```
+
+- `command=""` — run nothing on login
+- `no-pty` — never allocate a terminal
+- `permitopen="127.0.0.1:9443"` — this key may open **that one forward** and
+  nothing else
+
+If the Pi is stolen off the hillside, whoever takes it holds a key that can
+deliver weather data into one port. Not a shell, not the archive, not the
+rest of the network.
+
+### When the link drops
+
+It will — rural internet is rural internet. Three mechanisms overlap:
+
+- **The tunnel notices.** `ServerAliveInterval=30` with
+  `ServerAliveCountMax=3` detects a silently dead link within about ninety
+  seconds instead of hanging indefinitely. `ExitOnForwardFailure=yes` makes
+  SSH quit rather than sit there pretending to be connected with a forward
+  that never opened: a service that has failed should look failed.
+- **systemd restarts it** — `Restart=always`, `RestartSec=10`.
+- **The sender keeps its place.** Its connection attempts fail while the
+  tunnel is down, so it retries with a widening backoff; and because it
+  records its position after every single row, it resumes exactly where it
+  stopped once the tunnel returns.
+
+For the failure none of that catches — the server being rebuilt or restored
+from a backup and quietly missing files — the Pi discards its delivery
+record every six hours and sends everything again. Re-sending is safe by
+construction: rows are matched by content hash and blobs replace whole
+files, so anything already present is simply overwritten with itself.
+
+### What this means practically
+
+- The server firewall needs **one rule**: allow SSH. (Plus 443 later for the
+  public website, which is a separate concern.)
+- The Pi's network needs **no rules at all** — it only makes outbound
+  connections.
+- Moving the Pi to a different network needs **no configuration change**.
+- Neither machine needs a static IP, provided the Pi can resolve the
+  server's name.
 
 ---
 
@@ -220,7 +402,7 @@ the PC comes back, everything buffered up since the outage is sent.
 
 ## 5. The receiver (server)
 
-**File: `windows/receiver.py`**
+**File: `station/receiver.py`**
 
 It listens on port 9443 and understands exactly two kinds of message:
 
@@ -412,7 +594,7 @@ code is useless to anyone without your keys.
 
 ## 7. The station server
 
-**File: `server.py`** — the single command that runs the whole ground station.
+**File: `station/server.py`** — the single command that runs the whole ground station.
 
 Originally this was three separate programs in three terminal windows. Now
 one process runs three threads:
@@ -453,7 +635,7 @@ changed" is exactly what a silently-stuck pipeline looks like.
 
 So both sides run a timed sweep that ignores change detection entirely.
 
-**On the server** (`server.py`), every 6 hours everything is rebuilt from
+**On the server** (`station/server.py`), every 6 hours everything is rebuilt from
 whatever is actually on disk:
 
 ```python
@@ -502,7 +684,7 @@ have is cheaper than trying to find out.
 
 ## 8. Data preparation: CSV to JSON
 
-**File: `rag-web-ui/generate_dashboard_api.py`**
+**File: `station/api.py`**
 
 Browsers can't easily read CSV. This converts it into JSON, which they can.
 It writes two files:
@@ -574,9 +756,37 @@ visual break rather than a line drawn straight through them.
 
 ---
 
+### Why the API is split by range
+
+Originally the browser downloaded the entire archive on every page load
+and filtered it in JavaScript. That is fine at a few hundred kilobytes and
+untenable later: at one-minute logging, a year of weather is about 84 MB,
+and five years is 421 MB — per page load.
+
+So the server pre-computes one file per range and averages long ranges
+down to about 1200 points, which is as many as a chart a thousand pixels
+wide can distinguish anyway:
+
+```
+web/api/weather/history-24h.json      4.3 KB
+web/api/weather/history-7d.json      28   KB
+web/api/weather/history-30d.json    113   KB
+web/api/weather/history-all.json    141   KB
+```
+
+Switching range now fetches a different small file instead of re-slicing a
+large one. Averaging rather than sampling matters: dropping every Nth point
+can drop the one that mattered, silently removing a real extreme, whereas
+averaging keeps every measurement represented in the result.
+
+Gap markers survive downsampling untouched, so an outage stays a break in
+the line rather than being averaged into a smooth curve across it.
+
+---
+
 ## 9. The weather dashboard
 
-**Files: `rag-web-ui/web/index.html`, `styles.css`**
+**Files: `web/index.html`, `styles.css`**
 
 Four charts (temperature, dew point, humidity, pressure), current
 conditions, and a range selector.
@@ -653,9 +863,84 @@ property for equipment at a remote observatory.
 
 ---
 
+## 9c. The other pages
+
+The site grew from one dashboard into eight. Each answers a different
+question, and they deliberately do not overlap.
+
+| Page | The question it answers |
+|---|---|
+| **Overview** (`index.html`) | Is everything all right, and where is the sun? |
+| **Weather** | What has the weather been doing? |
+| **Power** | What is each subsystem drawing? |
+| **Status** | Is the station actually recording, and how much has it missed? |
+| **Sun** | When is the sun up, today and across the year? |
+| **Spectrograms** | What did the instrument see? |
+| **Log** | What has happened to this station? |
+| **About** | What is this, and who built it? |
+
+### Overview — the landing page
+
+Opens with the sun drawn as an arc from sunrise to sunset, with a marker
+where the sun currently is. That is a picture rather than three
+timestamps because "where are we in the day" is read far faster from a
+shape, and because at 03:00 a row of numbers tells you nothing while an
+empty arc tells you immediately that it is night.
+
+Below it: the latest weather, the latest power draw, the instrument's
+totals, and a strip showing whether each data stream is delivering.
+
+It does **not** auto-refresh the data. The demo archive is static, so a
+countdown that never changes would be theatre. The refresh function is
+written to be re-runnable, so switching it on later is one `setInterval`
+call — the code says as much where it would go.
+
+### Status — uptime measured, not asserted
+
+"Uptime" for a logging station is not whether a machine answers a ping. A
+Pi can be perfectly reachable while the receiver has been silently dead
+for a week. What matters is whether the data that was supposed to exist
+exists.
+
+So every figure on this page is derived from files on disk:
+
+- **Live state** comes from how long ago each stream last delivered
+  anything, compared against a limit that is a generous multiple of that
+  stream's own cadence. One missed sample is not an outage; three hours of
+  silence from a fifteen-minute instrument is.
+- **Coverage** is a per-day count of what arrived against what was
+  expected. CALLISTO writes 96 files a day, so 48 files is 50% coverage
+  for that day, plainly.
+
+The instrument stream decides the overall verdict. Weather still flowing
+while CALLISTO is silent is exactly the failure this page exists to catch,
+and averaging the three together would hide it.
+
+### Sun — computed, never fetched
+
+Sunrise and sunset come from the NOAA solar-position algorithm evaluated
+for the observatory's coordinates. No weather API, no network call. The
+station therefore knows when the sun rises with no internet at all, which
+matters because this drives observation scheduling.
+
+Accuracy is a few minutes. The algorithm ignores terrain, so a hill on the
+horizon will always delay real sunrise past the computed one — worth
+knowing before treating it as gospel.
+
+### Log — two kinds of history
+
+Posts are prose, written by hand in `web/blog/posts.json`. Instrument
+posts quote the e-Callisto network journal and link the original entry, so
+a reader can check the claim. Software posts explain how the monitoring
+works. `CHANGELOG.md` is still the machine-readable record of every
+version, but it is not rendered here: a reader wants two articles, not
+eleven version bumps.
+
+---
+
 ## 10. The power dashboard
 
-**File: `rag-web-ui/web/power.html`**
+**File: `web/power.html`**
 
 The station's own health telemetry — four powered subsystems:
 
@@ -744,7 +1029,7 @@ reports.
 
 ## 11. The spectrogram viewer
 
-**File: `rag-web-ui/web/fits.html`**
+**File: `web/fits.html`**
 
 This displays actual solar radio observations from the Višnjan CALLISTO
 instrument.
@@ -922,12 +1207,12 @@ down, which is something you want to see rather than have hidden.
 
 ## 12. Supporting scripts
 
-- **`rag-web-ui/fetch_visnjan_fits.py`** — downloads real spectrograms from
+- **`tools/fetch_visnjan_fits.py`** — downloads real spectrograms from
   the central e-Callisto archive. Skips files it already has (the archive
   never changes, so re-downloading is pure waste) and searches *backwards*
   for days that actually contain data, because the station has long gaps.
 
-- **`rag-web-ui/fetch_demo_weather.py`** — downloads real measured weather
+- **`tools/fetch_demo_weather.py`** — downloads real measured weather
   for Višnjan's coordinates from Open-Meteo, and writes it in the station's
   CSV format. This is **demo data for developing the dashboard** when the
   Pi isn't connected. It's real measured weather, not simulated. It can also
@@ -937,7 +1222,7 @@ down, which is something you want to see rather than have hidden.
 - **`pi/setup_pi.sh`** — installs the sender on the Pi as a *service*, so it
   starts automatically at boot and restarts if it crashes.
 
-- **`windows/install_and_run.ps1`** — generates the certificate and token,
+- **`deploy/install_receiver.ps1`** — generates the certificate and token,
   opens the firewall port, registers the receiver to start at login.
 
 ---
@@ -957,7 +1242,7 @@ token and fingerprint — the Pi needs them.
 **On the PC (every time):**
 
 ```bash
-python server.py
+python station/server.py
 ```
 
 Then open `http://127.0.0.1:8090/`.
@@ -974,8 +1259,8 @@ chmod +x setup_pi.sh
 **To load demo data without a Pi:**
 
 ```bash
-python rag-web-ui/fetch_demo_weather.py --days 35
-python rag-web-ui/fetch_visnjan_fits.py --days 3
+python tools/fetch_demo_weather.py --days 35
+python tools/fetch_visnjan_fits.py --days 3
 ```
 
 ---
@@ -1073,6 +1358,36 @@ Real bugs, found by testing rather than reading:
 
     const sourceRow = ascending ? height - 1 - y : y;
     ```
+
+---
+
+
+12. **Solar times were twelve hours out.** The Julian Day Number is
+    defined at *noon*, and the code treated it as midnight. Caught because
+    solar noon came out at 23:07 UTC for a site at 13.7° east, where it
+    should be about 11:05. The day *lengths* were correct throughout,
+    which is why it was not obvious — the shape of the year was right and
+    only the clock was wrong.
+
+13. **A CSS selector matched more than intended.** A bare
+    `header { display: flex }` rule for the page banner also matched every
+    `<header>` inside a log article, laying titles, dates and summaries out
+    as overlapping columns. Scoped to `.wrap > header`.
+
+14. **Two text colours failed contrast.** Measured, not noticed:
+    `--text-faint` came out at 2.12:1 against the panel surface — below
+    even the 3:1 floor for non-text — and `--text-dim`, which carries body
+    copy, at 3.87:1 against a 4.5:1 requirement. Both were invisible
+    problems on a good monitor in a dark room and very visible on a laptop
+    outdoors.
+
+15. **The keyboard focus ring did not exist.** It computed to
+    `outline-style: none` on buttons, so tabbing through the site gave no
+    indication of position at all.
+
+16. **The navigation forced horizontal scrolling on phones.** Seven tabs
+    is 560px of nav at a 375px viewport, which pushed the entire page
+    sideways.
 
 ---
 
