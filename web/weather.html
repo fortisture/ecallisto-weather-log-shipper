@@ -431,36 +431,12 @@
     // DOM HELPERS
     // ============================================================
 
-    function element(id) {
-      return document.getElementById(id);
-    }
 
 
-    function setText(id, value) {
-      const node = element(id);
-      if (node) {
-        node.textContent = value;
-      }
-    }
 
 
-    function showError(message) {
-      const panel = element("error-panel");
-      panel.textContent = message;
-      panel.style.display = "block";
-
-      setText("connection-status", "DATA: ERROR");
-      setText("last-updated", "SYNC FAILED");
-      element("status-dot").style.background = "#E85D5D";
-    }
 
 
-    function clearError() {
-      const panel = element("error-panel");
-      panel.textContent = "";
-      panel.style.display = "none";
-      element("status-dot").style.background = "var(--signal)";
-    }
 
 
     // ============================================================
@@ -508,104 +484,30 @@
     // TIME FORMATTING (UTC + LOCAL)
     // ============================================================
 
-    function parseDate(value) {
-      if (value === null || value === undefined || value === "") {
-        throw new Error("Missing timestamp");
-      }
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) {
-        throw new Error("Invalid timestamp: " + value);
-      }
-      return date;
-    }
 
 
-    function fmtUTC(value) {
-      return parseDate(value).toISOString().replace("T", " ").slice(0, 16) + " UTC";
-    }
 
 
-    function fmtUTCTime(value) {
-      return parseDate(value).toISOString().slice(11, 16) + " UTC";
-    }
 
 
-    function fmtUTCDate(value) {
-      return parseDate(value).toISOString().slice(0, 10);
-    }
 
 
     /* Local wall-clock time, plus the viewer's zone abbreviation so
      * "07:50" is never ambiguous about which clock it belongs to. */
-    function fmtLocal(value) {
-      const date = parseDate(value);
-
-      const stamp = date.getFullYear() + "-" +
-        String(date.getMonth() + 1).padStart(2, "0") + "-" +
-        String(date.getDate()).padStart(2, "0") + " " +
-        String(date.getHours()).padStart(2, "0") + ":" +
-        String(date.getMinutes()).padStart(2, "0");
-
-      return stamp + " " + localZoneName(date);
-    }
 
 
-    function localZoneName(date) {
-      try {
-        const parts = new Intl.DateTimeFormat(undefined, {
-          timeZoneName: "short"
-        }).formatToParts(date);
-
-        const zone = parts.find(part => part.type === "timeZoneName");
-        if (zone && zone.value) {
-          return zone.value;
-        }
-      }
-      catch (err) {
-        /* Intl unavailable -- fall through to the numeric offset. */
-      }
-
-      const offsetMinutes = -date.getTimezoneOffset();
-      const sign = offsetMinutes >= 0 ? "+" : "-";
-      const abs = Math.abs(offsetMinutes);
-
-      return "UTC" + sign +
-        String(Math.floor(abs / 60)).padStart(2, "0") + ":" +
-        String(abs % 60).padStart(2, "0");
-    }
 
 
-    function fmtAgo(fromDate) {
-      const seconds = Math.max(0, Math.round((Date.now() - fromDate.getTime()) / 1000));
-
-      if (seconds < 60) {
-        return seconds + "S AGO";
-      }
-      if (seconds < 3600) {
-        return Math.floor(seconds / 60) + "M AGO";
-      }
-      if (seconds < 86400) {
-        return Math.floor(seconds / 3600) + "H AGO";
-      }
-      return Math.floor(seconds / 86400) + "D AGO";
-    }
 
 
     // ============================================================
     // NUMBERS
     // ============================================================
 
-    function numberOrNull(value) {
-      if (value === null || value === undefined || value === "") {
-        return null;
-      }
-      const number = Number(value);
-      return Number.isFinite(number) ? number : null;
-    }
 
 
     function fmtValue(value, decimals = 1) {
-      const number = numberOrNull(value);
+      const number = DORM.num(value);
       return number === null ? "—" : number.toFixed(decimals);
     }
 
@@ -624,7 +526,7 @@
       if (!("timestamp" in data)) {
         throw new Error('latest.json is missing the "timestamp" field.');
       }
-      parseDate(data.timestamp);
+      DORM.parseDate(data.timestamp);
     }
 
 
@@ -650,11 +552,11 @@
         return readings.slice();
       }
 
-      const newest = parseDate(readings[readings.length - 1].timestamp).getTime();
+      const newest = DORM.parseDate(readings[readings.length - 1].timestamp).getTime();
       const cutoff = newest - hours * 3600 * 1000;
 
       return readings.filter(
-        reading => parseDate(reading.timestamp).getTime() >= cutoff
+        reading => DORM.parseDate(reading.timestamp).getTime() >= cutoff
       );
     }
 
@@ -697,7 +599,7 @@
 
     function calculateStats(readings, field) {
       const values = readings
-        .map(reading => numberOrNull(reading[field]))
+        .map(reading => DORM.num(reading[field]))
         .filter(value => value !== null);
 
       if (!values.length) {
@@ -790,20 +692,10 @@
     }
 
 
-    function medianOf(values) {
-      const clean = values.filter(v => v !== null && v !== undefined).sort((a, b) => a - b);
-      if (!clean.length) {
-        return null;
-      }
-      const mid = Math.floor(clean.length / 2);
-      return clean.length % 2
-        ? clean[mid]
-        : (clean[mid - 1] + clean[mid]) / 2;
-    }
 
 
     function buildChart(canvasId, field, spec, labels, values) {
-      const canvas = element(canvasId);
+      const canvas = DORM.el(canvasId);
       if (!canvas) {
         return;
       }
@@ -814,7 +706,7 @@
        * pressure crash) drag a mean away from what the period was
        * actually like. The median says "half the time it was above
        * this", which is what you want from a reference line. */
-      const median = medianOf(values);
+      const median = DORM.median(values);
       const medianSeries = values.map(() => median);
 
       if (charts[canvasId]) {
@@ -900,51 +792,51 @@
         return;
       }
 
-      setText("current-temp", fmtValue(latestReading.temp_c, 1));
+      DORM.setText("current-temp", fmtValue(latestReading.temp_c, 1));
 
-      setText("current-timestamp", "READING AT " + fmtUTC(latestReading.timestamp));
-      setText("current-timestamp-local", "LOCAL " + fmtLocal(latestReading.timestamp));
+      DORM.setText("current-timestamp", "READING AT " + DORM.utcStamp(latestReading.timestamp));
+      DORM.setText("current-timestamp-local", "LOCAL " + DORM.localStamp(latestReading.timestamp));
 
-      setText("current-dew", fmtValue(latestReading.dew_point_c, 1) + " °C");
-      setText("current-humidity", fmtValue(latestReading.humidity_pct, 0) + " %");
-      setText("current-pressure", fmtValue(latestReading.pressure_hpa, 1) + " hPa");
+      DORM.setText("current-dew", fmtValue(latestReading.dew_point_c, 1) + " °C");
+      DORM.setText("current-humidity", fmtValue(latestReading.humidity_pct, 0) + " %");
+      DORM.setText("current-pressure", fmtValue(latestReading.pressure_hpa, 1) + " hPa");
 
       const stats = calculateStats(windowed, "temp_c");
 
-      setText("stat-min-label", label + " Min");
-      setText("stat-avg-label", label + " Avg");
-      setText("stat-max-label", label + " Max");
+      DORM.setText("stat-min-label", label + " Min");
+      DORM.setText("stat-avg-label", label + " Avg");
+      DORM.setText("stat-max-label", label + " Max");
 
-      setText("stat-min", stats.min === null ? "—" : fmtValue(stats.min, 1) + "°");
-      setText("stat-avg", stats.avg === null ? "—" : fmtValue(stats.avg, 1) + "°");
-      setText("stat-max", stats.max === null ? "—" : fmtValue(stats.max, 1) + "°");
+      DORM.setText("stat-min", stats.min === null ? "—" : fmtValue(stats.min, 1) + "°");
+      DORM.setText("stat-avg", stats.avg === null ? "—" : fmtValue(stats.avg, 1) + "°");
+      DORM.setText("stat-max", stats.max === null ? "—" : fmtValue(stats.max, 1) + "°");
 
-      setText("last-updated", "SYNCED " + fmtUTC(latestReading.timestamp));
-      setText("last-updated-local", "LOCAL " + fmtLocal(latestReading.timestamp));
-      setText("connection-status", "DATA: WEATHER ONLINE");
+      DORM.setText("last-updated", "SYNCED " + DORM.utcStamp(latestReading.timestamp));
+      DORM.setText("last-updated-local", "LOCAL " + DORM.localStamp(latestReading.timestamp));
+      DORM.setText("connection-status", "DATA: WEATHER ONLINE");
 
       if (windowed.length) {
         const first = windowed[0].timestamp;
         const last = windowed[windowed.length - 1].timestamp;
-        setText(
+        DORM.setText(
           "range-summary",
-          fmtUTCDate(first) + " → " + fmtUTCDate(last) +
+          DORM.utcDate(first) + " → " + DORM.utcDate(last) +
           "  ·  " + windowed.length + " READINGS"
         );
       }
       else {
-        setText("range-summary", "NO DATA IN RANGE");
+        DORM.setText("range-summary", "NO DATA IN RANGE");
       }
     }
 
 
     function renderCharts(label, windowed, plotted) {
       if (typeof Chart === "undefined") {
-        const fallback = element("chart-fallback");
+        const fallback = DORM.el("chart-fallback");
         if (fallback) {
           fallback.style.display = "flex";
         }
-        setText("sample-label", "CHART OFFLINE");
+        DORM.setText("sample-label", "CHART OFFLINE");
         return;
       }
 
@@ -955,8 +847,8 @@
       const labels = plotted.map(reading => {
         try {
           return longRange
-            ? fmtUTCDate(reading.timestamp).slice(5) + " " + fmtUTCTime(reading.timestamp).slice(0, 5)
-            : fmtUTCTime(reading.timestamp);
+            ? DORM.utcDate(reading.timestamp).slice(5) + " " + DORM.utcTime(reading.timestamp).slice(0, 5)
+            : DORM.utcTime(reading.timestamp);
         }
         catch {
           return "";
@@ -964,16 +856,16 @@
       });
 
       buildChart("temp-chart", "temp_c", SERIES.temp, labels,
-        plotted.map(r => numberOrNull(r.temp_c)));
+        plotted.map(r => DORM.num(r.temp_c)));
 
       buildChart("dew-chart", "dew_point_c", SERIES.dew, labels,
-        plotted.map(r => numberOrNull(r.dew_point_c)));
+        plotted.map(r => DORM.num(r.dew_point_c)));
 
       buildChart("humidity-chart", "humidity_pct", SERIES.humidity, labels,
-        plotted.map(r => numberOrNull(r.humidity_pct)));
+        plotted.map(r => DORM.num(r.humidity_pct)));
 
       buildChart("pressure-chart", "pressure_hpa", SERIES.pressure, labels,
-        plotted.map(r => numberOrNull(r.pressure_hpa)));
+        plotted.map(r => DORM.num(r.pressure_hpa)));
 
       renderChartFooters(label, windowed, plotted);
     }
@@ -981,28 +873,28 @@
 
     function renderChartFooters(label, windowed, plotted) {
       if (!windowed.length) {
-        setText("chart-range", "NO DATA IN RANGE");
-        setText("sample-count", "0 SAMPLES");
-        setText("sample-label", "NO DATA");
+        DORM.setText("chart-range", "NO DATA IN RANGE");
+        DORM.setText("sample-count", "0 SAMPLES");
+        DORM.setText("sample-label", "NO DATA");
         return;
       }
 
       const first = windowed[0].timestamp;
       const last = windowed[windowed.length - 1].timestamp;
 
-      setText(
+      DORM.setText(
         "chart-range",
-        fmtUTCDate(first) + " " + fmtUTCTime(first) + " → " + fmtUTCTime(last)
+        DORM.utcDate(first) + " " + DORM.utcTime(first) + " → " + DORM.utcTime(last)
       );
 
-      setText(
+      DORM.setText(
         "sample-count",
         plotted.length < windowed.length
           ? plotted.length + " OF " + windowed.length + " SAMPLES"
           : windowed.length + " SAMPLES"
       );
 
-      setText("sample-label", sampleIntervalLabel(windowed));
+      DORM.setText("sample-label", sampleIntervalLabel(windowed));
 
       /* Per-chart footers: range span + current value. */
       const pairs = [
@@ -1014,7 +906,7 @@
       pairs.forEach(([prefix, field, spec]) => {
         const stats = calculateStats(windowed, field);
 
-        setText(
+        DORM.setText(
           prefix + "-range",
           stats.min === null
             ? "NO DATA"
@@ -1022,7 +914,7 @@
               " – " + fmtValue(stats.max, spec.decimals) + " " + spec.unit
         );
 
-        setText(
+        DORM.setText(
           prefix + "-current",
           latestReading
             ? "NOW " + fmtValue(latestReading[field], spec.decimals) + " " + spec.unit
@@ -1039,8 +931,8 @@
 
       const minutes = Math.round(
         Math.abs(
-          parseDate(readings[1].timestamp).getTime() -
-          parseDate(readings[0].timestamp).getTime()
+          DORM.parseDate(readings[1].timestamp).getTime() -
+          DORM.parseDate(readings[0].timestamp).getTime()
         ) / 60000
       );
 
@@ -1058,7 +950,7 @@
       if (!lastFetchAt) {
         return;
       }
-      setText("refresh-age", "UPDATED " + fmtAgo(lastFetchAt));
+      DORM.setText("refresh-age", "UPDATED " + DORM.ago(lastFetchAt).toUpperCase());
     }
 
 
@@ -1086,7 +978,7 @@
     // ============================================================
 
     async function loadDashboard() {
-      clearError();
+      DORM.clearError();
 
       try {
         const latest = await fetchJSON(LATEST_URL);
@@ -1112,7 +1004,7 @@
       }
       catch (error) {
         console.error("[DORM] dashboard failed", error);
-        showError(error.message);
+        DORM.showError(error.message);
       }
     }
 

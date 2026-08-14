@@ -300,8 +300,11 @@
       (isDay
         ? '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="#E8A855" filter="url(#sunGlow)"/>' +
           '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="none" stroke="#0A0E13" stroke-width="2"/>'
-        : '<circle cx="' + (cx + r * Math.cos(Math.PI * 1.12)) + '" cy="' + (cy + 20) + '" ' +
-          'r="7" fill="#2A3A4A"/>') +
+        /* Below the horizon, centred. The earlier version placed this at
+         * an angle past sunrise, which put it at x=220 -- directly on top
+         * of the sunrise time label at x=210. Centring keeps it clear of
+         * both end labels, and matches the sun page. */
+        : '<circle cx="' + cx + '" cy="' + (cy + 20) + '" r="7" fill="#2A3A4A"/>') +
 
       '<text x="' + cx + '" y="' + (cy - r - 12) + '" text-anchor="middle" ' +
         'fill="#45525F" font-family="IBM Plex Mono" font-size="10" letter-spacing="1.5">' +

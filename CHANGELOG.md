@@ -5,6 +5,35 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.7.0] - 2026-08-14
+
+### Fixed
+- **The moon overlapped the sunrise time on the Overview.** After dark the
+  arc shows a dim circle for the sun below the horizon. It was positioned
+  at an angle past sunrise, which put it at x=220 — directly on top of the
+  sunrise label at x=210. Centred now, clear of both end labels, matching
+  the sun page which had always done it correctly.
+- The Power page heading said "Power Rails"; it is just Power.
+
+### Changed
+- **`weather.html` and `power.html` now use the shared helpers** instead of
+  carrying their own copies. About 7,000 characters of duplicate code
+  removed (weather 1138 → 1030 lines, power 777 → 671).
+
+  Two of the ten helpers were *not* equivalent, which is why they were
+  compared before being replaced rather than renamed blindly:
+  `fmtAgo` returned upper case ("24S AGO") where `DORM.ago` returns lower,
+  so the one call site now upper-cases explicitly and the display is
+  unchanged; and `fmt` defaulted to 0 decimals against `DORM.fmt`'s 1, but
+  every call site passes decimals explicitly so the default is unreachable.
+
+  The refactor broke the Power page mid-way: a regex removing one function
+  matched past its closing brace and swallowed the adjacent `fetchJSON`,
+  whose call site was then undefined. Caught by testing the page rather
+  than by reading the diff. Replaced with `DORM.getJSON`, which also
+  retires an error message still pointing at the pre-restructure
+  `rag-web-ui/simulate_demo_power.py`.
+
 ## [4.6.0] - 2026-08-14
 
 Review and stress-test pass over the whole codebase. `tools/stress_test.py`

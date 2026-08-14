@@ -39,7 +39,7 @@
 
       <div class="id-block">
         <div class="eyebrow">Višnjan · Station Health</div>
-        <h1>DORM <span>/ Power Rails</span></h1>
+        <h1>DORM <span>/ Power</span></h1>
       </div>
 
       <div class="status-block">
@@ -250,126 +250,26 @@
     let lastFetchAt = null;
 
 
-    function element(id) { return document.getElementById(id); }
-
-    function setText(id, value) {
-      const node = element(id);
-      if (node) node.textContent = value;
-    }
-
-    function showError(message) {
-      const panel = element("error-panel");
-      panel.textContent = message;
-      panel.style.display = "block";
-      setText("connection-status", "DATA: ERROR");
-      setText("last-updated", "SYNC FAILED");
-      element("status-dot").style.background = "#E85D5D";
-    }
-
-    function clearError() {
-      const panel = element("error-panel");
-      panel.textContent = "";
-      panel.style.display = "none";
-      element("status-dot").style.background = "var(--signal)";
-    }
-
-
-    async function fetchJSON(url) {
-      let response;
-      try {
-        response = await fetch(url + "?_=" + Date.now(), { cache: "no-store" });
-      }
-      catch (e) {
-        throw new Error(
-          "Could not fetch:\n" + url + "\n\n" + e.message +
-          "\n\nStart the station server:  python server.py"
-        );
-      }
-      if (!response.ok) {
-        throw new Error(
-          "Not found:\n" + url + "\n\nHTTP " + response.status +
-          "\n\nNo power telemetry stored yet. The Pi ships any CSV whose\n" +
-          "name contains \"power\"; for a demo run:\n" +
-          "python rag-web-ui/simulate_demo_power.py"
-        );
-      }
-      return response.json();
-    }
 
 
     // ---------- time ----------
 
-    function parseDate(value) {
-      if (!value) throw new Error("Missing timestamp");
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) throw new Error("Invalid timestamp: " + value);
-      return date;
-    }
 
-    function fmtUTC(value) {
-      return parseDate(value).toISOString().replace("T", " ").slice(0, 16) + " UTC";
-    }
 
-    function fmtUTCTime(value) {
-      return parseDate(value).toISOString().slice(11, 16) + " UTC";
-    }
 
-    function fmtUTCDate(value) {
-      return parseDate(value).toISOString().slice(0, 10);
-    }
 
-    function localZoneName(date) {
-      try {
-        const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
-          .formatToParts(date);
-        const zone = parts.find(p => p.type === "timeZoneName");
-        if (zone && zone.value) return zone.value;
-      }
-      catch (e) { /* fall through */ }
 
-      const offset = -date.getTimezoneOffset();
-      const sign = offset >= 0 ? "+" : "-";
-      const abs = Math.abs(offset);
-      return "UTC" + sign + String(Math.floor(abs / 60)).padStart(2, "0") +
-        ":" + String(abs % 60).padStart(2, "0");
-    }
 
-    function fmtLocal(value) {
-      const date = parseDate(value);
-      const stamp = date.getFullYear() + "-" +
-        String(date.getMonth() + 1).padStart(2, "0") + "-" +
-        String(date.getDate()).padStart(2, "0") + " " +
-        String(date.getHours()).padStart(2, "0") + ":" +
-        String(date.getMinutes()).padStart(2, "0");
-      return stamp + " " + localZoneName(date);
-    }
-
-    function fmtAgo(from) {
-      const s = Math.max(0, Math.round((Date.now() - from.getTime()) / 1000));
-      if (s < 60) return s + "S AGO";
-      if (s < 3600) return Math.floor(s / 60) + "M AGO";
-      if (s < 86400) return Math.floor(s / 3600) + "H AGO";
-      return Math.floor(s / 86400) + "D AGO";
-    }
 
 
     // ---------- numbers ----------
 
-    function numberOrNull(value) {
-      if (value === null || value === undefined || value === "") return null;
-      const n = Number(value);
-      return Number.isFinite(n) ? n : null;
-    }
 
-    function fmt(value, decimals) {
-      const n = numberOrNull(value);
-      return n === null ? "—" : n.toFixed(decimals);
-    }
 
     /* Watts = volts x amps. Derived here, never read from the file. */
     function watts(reading, key) {
-      const v = numberOrNull(reading[key + "_v"]);
-      const ma = numberOrNull(reading[key + "_ma"]);
+      const v = DORM.num(reading[key + "_v"]);
+      const ma = DORM.num(reading[key + "_ma"]);
       return (v === null || ma === null) ? null : v * ma / 1000;
     }
 
@@ -383,12 +283,6 @@
       return any ? sum : null;
     }
 
-    function medianOf(values) {
-      const clean = values.filter(v => v !== null && v !== undefined).sort((a, b) => a - b);
-      if (!clean.length) return null;
-      const mid = Math.floor(clean.length / 2);
-      return clean.length % 2 ? clean[mid] : (clean[mid - 1] + clean[mid]) / 2;
-    }
 
 
     // ---------- range ----------
@@ -462,10 +356,10 @@
 
     function buildCurrentChart(rail, labels, values, decimals) {
       const canvasId = rail.key + "-chart";
-      const canvas = element(canvasId);
+      const canvas = DORM.el(canvasId);
       if (!canvas) return;
 
-      const median = medianOf(values);
+      const median = DORM.median(values);
       const medianSeries = values.map(() => median);
       const medianLabel = "Median " + (median === null ? "—" : median.toFixed(decimals) + " mA");
 
@@ -525,12 +419,12 @@
 
     function buildVoltageChart(labels, plotted) {
       const canvasId = "voltage-chart";
-      const canvas = element(canvasId);
+      const canvas = DORM.el(canvasId);
       if (!canvas) return;
 
       const datasets = RAILS.map(rail => ({
         label: rail.label,
-        data: plotted.map(r => numberOrNull(r[rail.key + "_v"])),
+        data: plotted.map(r => DORM.num(r[rail.key + "_v"])),
         borderColor: rail.color,
         backgroundColor: "transparent",
         borderWidth: 2,
@@ -551,7 +445,7 @@
         return;
       }
 
-      charts[canvasId] = new Chart(element(canvasId).getContext("2d"), {
+      charts[canvasId] = new Chart(DORM.el(canvasId).getContext("2d"), {
         type: "line",
         data: { labels, datasets },
         options: chartOptions("V", 2)
@@ -562,12 +456,12 @@
     // ---------- rendering ----------
 
     function renderRailCards() {
-      const strip = element("rail-strip");
+      const strip = DORM.el("rail-strip");
       strip.innerHTML = "";
 
       RAILS.forEach(rail => {
-        const v = latestReading ? numberOrNull(latestReading[rail.key + "_v"]) : null;
-        const ma = latestReading ? numberOrNull(latestReading[rail.key + "_ma"]) : null;
+        const v = latestReading ? DORM.num(latestReading[rail.key + "_v"]) : null;
+        const ma = latestReading ? DORM.num(latestReading[rail.key + "_ma"]) : null;
         const w = latestReading ? watts(latestReading, rail.key) : null;
 
         const cell = document.createElement("div");
@@ -578,9 +472,9 @@
             '<span class="rail-name">' + rail.label + "</span>" +
           "</div>" +
           '<div class="rail-values">' +
-            '<div><span class="rail-num">' + fmt(v, 2) + '</span><span class="rail-unit">V</span></div>' +
-            '<div><span class="rail-num">' + fmt(ma, 1) + '</span><span class="rail-unit">mA</span></div>' +
-            '<div><span class="rail-num">' + fmt(w, 2) + '</span><span class="rail-unit">W</span></div>' +
+            '<div><span class="rail-num">' + DORM.fmt(v, 2) + '</span><span class="rail-unit">V</span></div>' +
+            '<div><span class="rail-num">' + DORM.fmt(ma, 1) + '</span><span class="rail-unit">mA</span></div>' +
+            '<div><span class="rail-num">' + DORM.fmt(w, 2) + '</span><span class="rail-unit">W</span></div>' +
           "</div>";
         strip.appendChild(cell);
       });
@@ -600,53 +494,53 @@
       const labels = plotted.map(r => {
         try {
           return longRange
-            ? fmtUTCDate(r.timestamp).slice(5) + " " + fmtUTCTime(r.timestamp).slice(0, 5)
-            : fmtUTCTime(r.timestamp);
+            ? DORM.utcDate(r.timestamp).slice(5) + " " + DORM.utcTime(r.timestamp).slice(0, 5)
+            : DORM.utcTime(r.timestamp);
         }
         catch (e) { return ""; }
       });
 
       if (latestReading) {
-        setText("current-total", fmt(totalWatts(latestReading), 2));
-        setText("current-timestamp", "READING AT " + fmtUTC(latestReading.timestamp));
-        setText("current-timestamp-local", "LOCAL " + fmtLocal(latestReading.timestamp));
-        setText("last-updated", "SYNCED " + fmtUTC(latestReading.timestamp));
-        setText("last-updated-local", "LOCAL " + fmtLocal(latestReading.timestamp));
-        setText("connection-status", "DATA: POWER ONLINE");
+        DORM.setText("current-total", DORM.fmt(totalWatts(latestReading), 2));
+        DORM.setText("current-timestamp", "READING AT " + DORM.utcStamp(latestReading.timestamp));
+        DORM.setText("current-timestamp-local", "LOCAL " + DORM.localStamp(latestReading.timestamp));
+        DORM.setText("last-updated", "SYNCED " + DORM.utcStamp(latestReading.timestamp));
+        DORM.setText("last-updated-local", "LOCAL " + DORM.localStamp(latestReading.timestamp));
+        DORM.setText("connection-status", "DATA: POWER ONLINE");
       }
 
       renderRailCards();
 
       // Total-draw statistics over the selected window.
       const totals = windowed.map(totalWatts).filter(v => v !== null);
-      setText("stat-min-label", label + " Min");
-      setText("stat-avg-label", label + " Avg");
-      setText("stat-max-label", label + " Max");
+      DORM.setText("stat-min-label", label + " Min");
+      DORM.setText("stat-avg-label", label + " Avg");
+      DORM.setText("stat-max-label", label + " Max");
 
       if (totals.length) {
         const avg = totals.reduce((s, v) => s + v, 0) / totals.length;
-        setText("stat-min", Math.min(...totals).toFixed(2) + " W");
-        setText("stat-avg", avg.toFixed(2) + " W");
-        setText("stat-max", Math.max(...totals).toFixed(2) + " W");
+        DORM.setText("stat-min", Math.min(...totals).toFixed(2) + " W");
+        DORM.setText("stat-avg", avg.toFixed(2) + " W");
+        DORM.setText("stat-max", Math.max(...totals).toFixed(2) + " W");
       }
       else {
-        setText("stat-min", "—");
-        setText("stat-avg", "—");
-        setText("stat-max", "—");
+        DORM.setText("stat-min", "—");
+        DORM.setText("stat-avg", "—");
+        DORM.setText("stat-max", "—");
       }
 
       if (windowed.length) {
-        setText("range-summary",
-          fmtUTCDate(windowed[0].timestamp) + " → " +
-          fmtUTCDate(windowed[windowed.length - 1].timestamp) +
+        DORM.setText("range-summary",
+          DORM.utcDate(windowed[0].timestamp) + " → " +
+          DORM.utcDate(windowed[windowed.length - 1].timestamp) +
           "  ·  " + windowed.length + " READINGS");
       }
       else {
-        setText("range-summary", "NO DATA IN RANGE");
+        DORM.setText("range-summary", "NO DATA IN RANGE");
       }
 
       if (typeof Chart === "undefined") {
-        const fallback = element("chart-fallback");
+        const fallback = DORM.el("chart-fallback");
         if (fallback) fallback.style.display = "flex";
         return;
       }
@@ -655,18 +549,18 @@
         // The BME draws single-digit milliamps; one decimal on a 1800 mA
         // heater is noise, but on a 3 mA sensor it is the signal.
         const decimals = rail.key === "bme" ? 2 : 0;
-        const values = plotted.map(r => numberOrNull(r[rail.key + "_ma"]));
+        const values = plotted.map(r => DORM.num(r[rail.key + "_ma"]));
         buildCurrentChart(rail, labels, values, decimals);
 
-        const inRange = windowed.map(r => numberOrNull(r[rail.key + "_ma"]))
+        const inRange = windowed.map(r => DORM.num(r[rail.key + "_ma"]))
                                 .filter(v => v !== null);
-        setText(rail.key + "-range", inRange.length
+        DORM.setText(rail.key + "-range", inRange.length
           ? label + " " + Math.min(...inRange).toFixed(decimals) +
             " – " + Math.max(...inRange).toFixed(decimals) + " mA"
           : "NO DATA");
 
-        setText(rail.key + "-current", latestReading
-          ? "NOW " + fmt(latestReading[rail.key + "_ma"], decimals) + " mA"
+        DORM.setText(rail.key + "-current", latestReading
+          ? "NOW " + DORM.fmt(latestReading[rail.key + "_ma"], decimals) + " mA"
           : "—");
       });
 
@@ -674,10 +568,10 @@
 
       const volts = [];
       windowed.forEach(r => RAILS.forEach(rail => {
-        const v = numberOrNull(r[rail.key + "_v"]);
+        const v = DORM.num(r[rail.key + "_v"]);
         if (v !== null) volts.push(v);
       }));
-      setText("voltage-range", volts.length
+      DORM.setText("voltage-range", volts.length
         ? label + " " + Math.min(...volts).toFixed(2) + " – " + Math.max(...volts).toFixed(2) + " V"
         : "NO DATA");
     }
@@ -685,7 +579,7 @@
 
     function tickRefreshAge() {
       if (!lastFetchAt) return;
-      setText("refresh-age", "UPDATED " + fmtAgo(lastFetchAt));
+      DORM.setText("refresh-age", "UPDATED " + DORM.ago(lastFetchAt).toUpperCase());
     }
 
 
@@ -719,10 +613,10 @@
 
 
     async function loadDashboard() {
-      clearError();
+      DORM.clearError();
       try {
         const [latest, ranges] = await Promise.all([
-          fetchJSON(LATEST_URL),
+          DORM.getJSON(LATEST_URL),
           DORM.getJSON(RANGES_URL)
         ]);
 
@@ -760,7 +654,7 @@
       }
       catch (e) {
         console.error("[DORM] power dashboard failed", e);
-        showError(e.message);
+        DORM.showError(e.message);
       }
     }
 
