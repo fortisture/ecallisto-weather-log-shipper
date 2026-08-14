@@ -119,7 +119,7 @@ def main():
     ap.add_argument("--days", type=int, default=35, help="how many days back to fetch")
     ap.add_argument(
         "--out",
-        default=os.path.join(os.path.dirname(__file__), "..", "data", "weather"),
+        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "weather"),
         help="root of the weather store; files are written to <root>/YYYY/MM/DD/",
     )
     ap.add_argument(

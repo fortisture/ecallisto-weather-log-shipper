@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>DORM · About the Station</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./common.js"></script>
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+    <nav class="site-nav"></nav>
+
+    <header>
+      <div class="id-block">
+        <div class="eyebrow">Višnjan Observatory · Istria, Croatia</div>
+        <h1>DORM <span>/ About the Station</span></h1>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="dot" id="status-dot"></span>
+          <span id="connection-status">CROATIA-VISNJAN</span>
+        </div>
+        <div id="first-light">FIRST LIGHT 2024-08-11</div>
+        <div class="status-sub">e-CALLISTO NETWORK</div>
+      </div>
+    </header>
+
+    <div id="error-panel" class="error-panel"></div>
+
+
+    <!-- ================= COUNTERS ================= -->
+
+    <div class="counter-strip">
+
+      <div class="counter-cell">
+        <div class="counter-value" id="count-days">—</div>
+        <div class="counter-label">Observation days</div>
+        <div class="counter-sub" id="count-days-sub">&nbsp;</div>
+      </div>
+
+      <div class="counter-cell">
+        <div class="counter-value" id="count-sweeps">—</div>
+        <div class="counter-label">Spectrograms recorded</div>
+        <div class="counter-sub">15 minutes each</div>
+      </div>
+
+      <div class="counter-cell">
+        <div class="counter-value" id="count-since">—</div>
+        <div class="counter-label">Days since first light</div>
+        <div class="counter-sub">since 11 Aug 2024</div>
+      </div>
+
+      <div class="counter-cell">
+        <div class="counter-value" id="count-band">45–404</div>
+        <div class="counter-label">Frequency coverage</div>
+        <div class="counter-sub">MHz, 200 channels</div>
+      </div>
+
+    </div>
+
+
+    <!-- ================= THE STORY ================= -->
+
+    <section class="panel prose-panel">
+      <div class="panel-head">
+        <span class="label">The Station</span>
+        <span class="tag">VIŠNJAN RADIO ASTRONOMY</span>
+      </div>
+
+      <div class="prose is-centered">
+
+        <p>
+          Višnjan is a small hilltop village in inland Istria, and an
+          unlikely place to find one of Europe's more productive small
+          observatories. It began in the late 1970s, when
+          <strong>Korado Korlević</strong> and a few other teachers from the
+          local school founded an amateur astronomy society. In November
+          1992 that society opened a public observatory, which went on to
+          hold the IAU/MPC observatory code <strong>120</strong> and to
+          discover well over a thousand minor planets. As coastal lighting
+          grew, the observatory moved to darker skies at
+          <strong>Tićan</strong>, where it works today.
+        </p>
+
+        <p>
+          The thread running through all of it is teaching. The
+          <strong>Višnjan School of Astronomy</strong> has brought students
+          to the site for decades on a simple principle: students are not
+          shown science, they <em>do</em> science — with real instruments,
+          producing data that goes into real archives.
+        </p>
+
+        <h3>The CALLISTO receiver</h3>
+
+        <p>
+          Optical astronomy needs clear, dark nights. Radio astronomy does
+          not — it works through cloud, and in daylight, which is exactly
+          when you want to watch the Sun.
+        </p>
+
+        <p>
+          <strong>e-Callisto</strong> is a worldwide network of low-cost
+          solar radio spectrometers. More than 80 stations spread across
+          every longitude mean some part of the network is always in
+          daylight, so the Sun is never unobserved. When a flare accelerates
+          electrons through the corona they radiate at steadily lower
+          frequencies as they climb — drawing a bright streak down the
+          spectrogram over a few seconds. Those are Type III bursts, the
+          everyday signature of solar activity.
+        </p>
+
+        <p>
+          This station records <strong>200 channels from 45 to 404 MHz</strong>,
+          sweeping four times a second and writing one file every fifteen
+          minutes. Its receiver sits beneath the dormitory building at
+          Višnjan — which is where the name <strong>DORM</strong> comes from.
+          Observations are processed by the <strong>e-Callisto team at ETH
+          Zurich</strong>, who screen, classify and publish the network's
+          data for research use.
+        </p>
+
+        <p class="prose-note">
+          Croatia-Višnjan recorded first light on <strong>11 August 2024</strong>.
+        </p>
+
+      </div>
+    </section>
+
+
+    <!-- ================= PEOPLE ================= -->
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">People</span>
+        <span class="tag">MENTORS &amp; MAKERS</span>
+      </div>
+
+      <div class="people-note">
+        Biographies drawn from an interview with Marko Radolović published by
+        <a href="https://www.parentium.com/clanak/marko-radolovic-volonter-student-i-mentor-na-visnjanskom-putu-do-zvijezda"
+           rel="noopener noreferrer" target="_blank">Parentium</a>.
+      </div>
+
+      <div class="people-grid">
+
+        <div class="person-card">
+          <div class="person-role">Mentor · Founder</div>
+          <div class="person-name">Marko Radolović</div>
+          <div class="person-bio">
+            Volunteer, student and mentor on Višnjan's road to the stars.
+            When his own former mentor asked whether he would guide
+            secondary-school students through a new programme bringing the
+            Višnjan Astronomical Society into the e-Callisto network, he
+            agreed — and together with Matej Marković set up and adapted the
+            instrument that measures the Sun's radio emission beneath the
+            dormitory at Višnjan. He is drawn to project work with students
+            through the science camp: mentoring young people, and keeping
+            their curiosity going.
+          </div>
+        </div>
+
+        <div class="person-card">
+          <div class="person-role">Mentor · Founder</div>
+          <div class="person-name">Matej Marković</div>
+          <div class="person-bio">
+            Built and adapted the station's radio instrument together with
+            Marko Radolović, and presented the e-Callisto programme at
+            Višnjan with him. The pair brought the Astronomical Society
+            Višnjan into the network as a contributing station.
+          </div>
+        </div>
+
+        <div class="person-card is-group">
+          <div class="person-role">Makers</div>
+          <div class="person-name">Students of the Višnjan School of Astronomy</div>
+          <div class="person-bio">
+            The station's hardware, software and this monitoring site are
+            built and maintained by students of the school — the same
+            people who process the observations.
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- ================= GALLERY ================= -->
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">Gallery</span>
+        <span class="tag" id="gallery-tag">—</span>
+      </div>
+
+      <div class="gallery-body">
+        <div class="gallery-grid" id="gallery-grid"></div>
+
+        <div class="gallery-empty" id="gallery-empty">
+          <p><strong>No images yet.</strong></p>
+          <p>
+            Drop photographs into <code>web/gallery/</code> and list them in
+            <code>web/gallery/gallery.json</code>:
+          </p>
+<pre>{
+  "images": [
+    {
+      "file": "antenna-install.jpg",
+      "caption": "Raising the log-periodic antenna",
+      "credit": "Višnjan School of Astronomy",
+      "date": "2024-08-11"
+    }
+  ]
+}</pre>
+          <p>
+            They will appear here automatically. Keep images under ~1 MB
+            each so the page stays quick over the observatory's connection.
+          </p>
+        </div>
+      </div>
+    </section>
+
+
+
+    <!-- ================= STATION LOG ================= -->
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">Station Log</span>
+        <span class="tag" id="blog-tag">—</span>
+      </div>
+
+      <div class="blog-body">
+        <div class="blog-filter" id="blog-filter">
+          <button type="button" class="range-btn is-active" data-kind="all">ALL</button>
+          <button type="button" class="range-btn" data-kind="station">INSTRUMENT</button>
+          <button type="button" class="range-btn" data-kind="site">SOFTWARE</button>
+        </div>
+
+        <ol class="blog-list" id="blog-list"></ol>
+      </div>
+    </section>
+
+    <!-- ================= CONTACT ================= -->
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">Contact</span>
+        <span class="tag">STATION DETAILS</span>
+      </div>
+
+      <div class="contact-grid">
+
+        <div class="contact-item">
+          <div class="ci-label">Station code</div>
+          <div class="ci-value">Croatia-Visnjan</div>
+        </div>
+
+        <div class="contact-item">
+          <div class="ci-label">Coordinates</div>
+          <div class="ci-value">45.2775°N&nbsp; 13.7261°E</div>
+        </div>
+
+        <div class="contact-item">
+          <div class="ci-label">Network</div>
+          <div class="ci-value">
+            <a href="https://www.e-callisto.org/" rel="noopener noreferrer" target="_blank">e-Callisto</a>
+          </div>
+        </div>
+
+        <div class="contact-item">
+          <div class="ci-label">Observatory</div>
+          <div class="ci-value">
+            <a href="https://en.astro.hr/" rel="noopener noreferrer" target="_blank">astro.hr</a>
+          </div>
+        </div>
+
+        <div class="contact-item">
+          <div class="ci-label">Email</div>
+          <div class="ci-value" data-editable="contact-email">to be added</div>
+        </div>
+
+        <div class="contact-item">
+          <div class="ci-label">Source code</div>
+          <div class="ci-value">
+            <a href="https://github.com/fortisture/ecallisto-weather-log-shipper"
+               rel="noopener noreferrer" target="_blank">GitHub</a>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <footer class="page-footer">
+      DORM GROUND SUPPORT · VIŠNJAN OBSERVATORY · e-CALLISTO STATION CROATIA-VISNJAN
+    </footer>
+
+  </div>
+
+
+  <script>
+  /* ==================================================================
+   * About page.
+   *
+   * The counters are read from the live FITS index rather than typed in,
+   * so they cannot go stale -- "observation days" is exactly the number
+   * of days the archive holds spectrograms for.
+   * ================================================================== */
+
+  const FITS_URL = "./api/fits/index.json";
+  const GALLERY_URL = "./gallery/gallery.json";
+
+  const FIRST_LIGHT = "2024-08-11";
+
+
+  async function loadCounters() {
+    try {
+      const index = await DORM.getJSON(FITS_URL);
+      const totals = index.totals || {};
+
+      DORM.setText("count-days", totals.days_with_data || 0);
+      DORM.setText("count-sweeps", (totals.files || 0).toLocaleString());
+
+      const dates = index.available_dates || [];
+      if (dates.length) {
+        DORM.setText("count-days-sub", dates[0] + " → " + dates[dates.length - 1]);
+      }
+
+      const since = Math.floor(
+        (Date.now() - new Date(FIRST_LIGHT + "T00:00:00Z").getTime()) / 86400000
+      );
+      DORM.setText("count-since", since.toLocaleString());
+    }
+    catch (e) {
+      // The story should still read fine with no server running.
+      console.warn("[DORM] counters unavailable", e.message);
+      DORM.setText("count-days", "—");
+      DORM.setText("count-sweeps", "—");
+    }
+  }
+
+
+  async function loadGallery() {
+    const grid = DORM.el("gallery-grid");
+    const empty = DORM.el("gallery-empty");
+
+    let manifest;
+    try {
+      manifest = await DORM.getJSON(GALLERY_URL);
+    }
+    catch (e) {
+      DORM.setText("gallery-tag", "NOT CONFIGURED");
+      return;   // the instructions in gallery-empty stay visible
+    }
+
+    const images = (manifest && manifest.images) || [];
+    if (!images.length) {
+      DORM.setText("gallery-tag", "EMPTY");
+      return;
+    }
+
+    empty.style.display = "none";
+    DORM.setText("gallery-tag", images.length + " IMAGE" + (images.length === 1 ? "" : "S"));
+
+    grid.innerHTML = images.map(img =>
+      '<figure class="gallery-item">' +
+        '<img src="./gallery/' + encodeURIComponent(img.file) + '" ' +
+             'alt="' + (img.caption || "Station photograph") + '" loading="lazy">' +
+        '<figcaption>' +
+          '<span class="gc-caption">' + (img.caption || "") + "</span>" +
+          '<span class="gc-credit">' +
+            [img.credit, img.date].filter(Boolean).join(" · ") +
+          "</span>" +
+        "</figcaption>" +
+      "</figure>"
+    ).join("");
+  }
+
+
+  /* ---------------- station log ----------------
+   * Two feeds in one list: entries about the instrument (quoted from the
+   * e-Callisto network journal) and entries about this software (parsed
+   * straight out of CHANGELOG.md, so a release note appears here the
+   * moment it is committed rather than being retyped).
+   */
+  const BLOG_URL = "./api/blog.json";
+
+  let blogPosts = [];
+  let blogFilter = "all";
+
+
+  function renderBlog() {
+    const list = DORM.el("blog-list");
+    const shown = blogPosts.filter(p => blogFilter === "all" || p.kind === blogFilter);
+
+    if (!shown.length) {
+      list.innerHTML = '<li class="blog-empty">No entries.</li>';
+      return;
+    }
+
+    list.innerHTML = shown.map(post => {
+      const points = (post.points || []).length
+        ? "<ul>" + post.points.map(pt => "<li>" + escapeHtml(pt) + "</li>").join("") + "</ul>"
+        : "";
+
+      const quote = post.quote
+        ? '<blockquote>' + escapeHtml(post.quote) +
+          (post.source
+            ? '<cite>' +
+                (post.source_url
+                  ? '<a href="' + post.source_url + '" rel="noopener noreferrer" target="_blank">' +
+                    escapeHtml(post.source) + "</a>"
+                  : escapeHtml(post.source)) +
+              "</cite>"
+            : "") +
+          "</blockquote>"
+        : "";
+
+      return '<li class="blog-post is-' + (post.kind || "site") + '">' +
+        '<div class="bp-meta">' +
+          '<time>' + post.date + "</time>" +
+          '<span class="bp-kind">' +
+            (post.kind === "station" ? "INSTRUMENT" : "SOFTWARE") +
+          "</span>" +
+        "</div>" +
+        '<div class="bp-body">' +
+          "<h4>" + escapeHtml(post.title || "") + "</h4>" +
+          (post.body ? "<p>" + escapeHtml(post.body) + "</p>" : "") +
+          points + quote +
+        "</div>" +
+      "</li>";
+    }).join("");
+  }
+
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+
+  async function loadBlog() {
+    try {
+      const feed = await DORM.getJSON(BLOG_URL);
+      blogPosts = feed.posts || [];
+      DORM.setText("blog-tag", blogPosts.length + " ENTRIES");
+      renderBlog();
+    }
+    catch (e) {
+      console.warn("[DORM] station log unavailable", e.message);
+      DORM.setText("blog-tag", "UNAVAILABLE");
+      DORM.el("blog-list").innerHTML =
+        '<li class="blog-empty">Station log needs the server running.</li>';
+    }
+  }
+
+
+  DORM.el("blog-filter").querySelectorAll(".range-btn").forEach(button => {
+    button.addEventListener("click", () => {
+      DORM.el("blog-filter").querySelectorAll(".range-btn")
+        .forEach(b => b.classList.remove("is-active"));
+      button.classList.add("is-active");
+      blogFilter = button.dataset.kind;
+      renderBlog();
+    });
+  });
+
+
+  DORM.renderNav("about.html");
+  loadCounters();
+  loadGallery();
+  loadBlog();
+  </script>
+
+</body>
+
+</html>

@@ -18,7 +18,8 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "windows"))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "station"))
 
 from receiver import date_subdir, UNDATED_DIR  # noqa: E402
 
@@ -87,7 +88,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true", help="perform the moves (default: dry run)")
-    ap.add_argument("--data-dir", default=os.path.join(HERE, "data"))
+    ap.add_argument("--data-dir", default=os.path.join(ROOT, "data"))
     args = ap.parse_args()
 
     data_dir = os.path.abspath(args.data_dir)

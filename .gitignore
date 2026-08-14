@@ -1,5 +1,6 @@
 # ── Secrets ─────────────────────────────────────────────────────────
 # TLS material and the shared token. Never commit these.
+secrets/
 *.pem
 token.txt
 fingerprint.txt
@@ -14,7 +15,7 @@ incoming_logs/
 *.csv
 
 # Dashboard JSON is derived from data/ on every server start.
-rag-web-ui/web/api/
+web/api/
 
 # ── Runtime state ───────────────────────────────────────────────────
 .sender_state.json
@@ -27,3 +28,7 @@ __pycache__/
 
 # Local tooling settings, not project source
 .claude/
+
+server.log
+web/gallery/*
+!web/gallery/gallery.json

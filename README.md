@@ -1,132 +1,197 @@
-# eCallisto Weather Log Shipper
+# DORM — Višnjan e-Callisto Station
 
-Ships weather-station CSV logs from the Raspberry Pi running the eCallisto
-radio-spectrometer software to a Windows PC on the same LAN, continuously
-and securely, as each row is written.
+Monitoring for the **Croatia-Visnjan** solar radio spectrometer at Višnjan
+Observatory, Istria. Collects weather, power-rail telemetry and CALLISTO
+spectrograms from a Raspberry Pi at the telescope, stores them on a server,
+and serves a website that shows the lot.
 
-## How it works
+Everything here is **dependency-free Python 3 + static HTML**. No pip, no
+npm, no database.
 
 ```
-Raspberry Pi                              Windows PC
-------------                              ----------
-pi/sender.py                              windows/receiver.py
-  watches *.csv in a directory   --TLS-->   listens on :9443
-  hashes each file every poll,              authenticates the connection
-  compares against what was last            (shared-secret token)
-  sent: pure append -> ship new             verifies the sender is talking
-  rows; anything else changed ->            to it via cert-fingerprint pin
-  ship the whole file, replace              appends new rows, or replaces
-  reconnects automatically                  a file wholesale, under
-  (no dupes/drops on restart)               incoming_logs/
+Raspberry Pi  ──SSH tunnel──►  Ubuntu server  ──HTTPS──►  the web
+(instrument)                   (store + site)
 ```
 
-eCallisto rotates to a new CSV file each day (UTC); within a day, rows are
-appended to that day's file. Both are handled without any special-casing:
-new files are picked up the moment they appear (the watch directory is
-re-scanned every poll).
+---
 
-Appends and edits are told apart by comparing hashes, not just size: each
-poll, `sender.py` hashes a file's current content and checks whether it
-still starts with exactly what was last sent. If so, it's a pure append —
-only the new complete lines ship, one `ROW` message each, with state
-persisted after every single line so a mid-stream disconnect can't
-duplicate or drop one. If the content before that boundary has changed (an
-in-place edit to an already-shipped row) or the file got shorter (rotated
-or truncated under the same name), the whole current file ships as one
-`FILE` message and the receiver replaces its local copy wholesale.
+## Quick start (local, no install)
 
-**First run against a directory that already has old files in it ships
-their full existing contents**, not just rows appended from that point on
-— there's no "only watch what's new" mode. If you're pointing `sender.py`
-at a directory with weeks of prior daily logs, expect that history to be
-shipped once on the very first start.
-
-**Security model:** TLS encryption, the sender is pinned to the receiver's
-exact certificate fingerprint (refuses to talk to anything else), and every
-connection must present a shared-secret token or gets a `DENY`. No cloud,
-no port-forwarding — LAN only.
-
-Both scripts are dependency-free (Python 3 standard library only).
-
-## Setup
-
-### 1. Windows (receiver)
-
-```powershell
-cd windows
-.\install_and_run.ps1
-```
-
-This generates `cert.pem`/`key.pem`/`token.txt` in `windows/` (all
-gitignored), prints the certificate's SHA-256 fingerprint, opens a
-Private-profile firewall rule on TCP 9443, and registers a scheduled task
-that keeps the receiver running. Run it yourself in PowerShell — it
-touches firewall and scheduled-task state.
-
-### 2. Raspberry Pi (sender)
-
-Copy `pi/sender.py`, `pi/setup_pi.sh`, and a filled-in copy of
-`pi/config.example.json` to the Pi (fill in `host`/`port`/`token`/
-`fingerprint` from step 1), then:
+To run it on one machine and look at it:
 
 ```bash
-chmod +x setup_pi.sh
-./setup_pi.sh /path/to/weather_logs config.json
-sudo systemctl status weather-shipper
-journalctl -u weather-shipper -f
+git clone https://github.com/fortisture/ecallisto-weather-log-shipper.git
+cd ecallisto-weather-log-shipper
+
+python3 install.py secrets            # TLS keypair + shared token
+python3 tools/fetch_weather.py        # real weather history for Višnjan
+python3 tools/simulate_power.py       # simulated rail telemetry
+python3 tools/fetch_fits.py           # real spectrograms from the archive
+
+python3 station/server.py
 ```
 
-### Manual run (no systemd), useful for testing
+Open <http://127.0.0.1:8090/>.
+
+---
+
+## Installing for real
+
+Two machines, two commands. The installer prints every privileged command
+before it runs it, and never installs packages behind your back.
+
+### 1 · Server (Ubuntu)
 
 ```bash
-python3 sender.py config.json
+sudo python3 install.py server
 ```
 
-## Wire protocol
+It will:
 
-1. Client opens a TLS connection, verifies the server certificate's
-   SHA-256 fingerprint matches the pinned value (aborts otherwise).
-2. Client sends `AUTH <token>\n`. Server replies `OK\n` or `DENY\n`
-   (constant-time comparison) and closes on mismatch.
-3. Client sends one message per change, one of:
-   - `ROW\t<filename>\t<csv row content>\n` — append one row.
-   - `FILE\t<filename>\t<byte length>\n` followed by exactly
-     `<byte length>` raw bytes — replace the file's entire content.
+1. generate the TLS keypair and shared token in `secrets/`,
+2. create `data/{weather,power,fits}`,
+3. write and start `dorm-station.service`,
+4. print the **token** and **fingerprint** you need for the Pi.
 
-   In both cases `<filename>` is sanitized to a bare basename ending in
-   `.csv` (path traversal is rejected) before being applied under
-   `incoming_logs/`.
-
-## The station server
-
-The receiving PC runs one self-contained process that does everything:
-accepts data from the Pi, stores it locally, and serves the web UI from
-that local copy — so the site keeps working when the Pi is offline.
+Both the receiver and the web server bind to **127.0.0.1 only**. Nothing
+is publicly reachable except `sshd`.
 
 ```bash
-python server.py
+systemctl status dorm-station
+journalctl -u dorm-station -f
 ```
 
-Then open <http://127.0.0.1:8090/>. Add `--no-receiver` to serve the site
-without accepting Pi uploads.
+### 2 · Pi (Raspberry Pi OS)
 
-## Repository layout
-
-```
-server.py                      the station server: ingest + store + serve
-pi/sender.py                   sender, runs on the Pi
-pi/setup_pi.sh                 installs sender.py as a systemd service
-pi/config.example.json         config template (fill in and copy to the Pi)
-windows/receiver.py            TLS ingest, used by server.py
-windows/install_and_run.ps1    generates secrets + firewall + scheduled task
-rag-web-ui/                    the web UI and its data tooling
-data/                          local store: weather, power, fits (gitignored)
-migrate_store_layout.py        moves an old flat store into the new layout
-M&M EXPLANATION FOR DUMMIES.md full plain-English explanation of everything
-CHANGELOG.md
+```bash
+sudo python3 install.py pi
 ```
 
-**The repository holds code, never data.** Everything the station collects
-or downloads lives in `data/` and is gitignored, along with all secrets
-(`*.pem`, `token.txt`, `fingerprint.txt`, `config.json`) and the generated
-dashboard JSON. Clone the repo anywhere and it rebuilds its own data.
+It asks for the server's SSH details and the token/fingerprint from step 1,
+then:
+
+1. generates an SSH key for the tunnel,
+2. installs `sender.py` and its config to `/opt/dorm`,
+3. writes `dorm-tunnel.service` and `dorm-sender.service`,
+4. prints the public key to authorise on the server.
+
+Add that key on the **server**, then start both services on the Pi:
+
+```bash
+sudo systemctl enable --now dorm-tunnel dorm-sender
+journalctl -u dorm-sender -f
+```
+
+### 3 · Public HTTPS
+
+The site listens on localhost, so put a reverse proxy in front of it. See
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+### Checking an install
+
+```bash
+python3 install.py check
+```
+
+---
+
+## Why an SSH tunnel
+
+The Pi and the server are on different networks, and only port 22 is open
+on the server. Rather than exposing a data port to the internet, the Pi
+opens an SSH tunnel and speaks to the receiver through it:
+
+```
+Pi                                        Ubuntu server
+sender.py ─► 127.0.0.1:19443
+                  │
+                  └── ssh -L ──────────► 127.0.0.1:9443  (receiver)
+                      (port 22)
+```
+
+The TLS + certificate-pinning + shared-token layer stays in place *inside*
+the tunnel. SSH authenticates the machines; the inner layer means even a
+compromised tunnel cannot inject data. The Pi's key can be restricted in
+`authorized_keys` so it can open that one forward and nothing else — no
+shell, even if the Pi is stolen.
+
+---
+
+## Layout
+
+```
+install.py              one installer for both roles
+station/                the server
+  server.py               ingest + watcher + web server, one process
+  receiver.py             TLS ingest from the Pi
+  api.py                  CSV -> the JSON the site reads
+  status.py               uptime, solar ephemeris, station log
+pi/                     what runs on the Pi
+  sender.py               watches files, ships changes
+  setup_pi.sh             manual alternative to install.py
+web/                    the site (static; no build step)
+  index.html              overview + sun visual
+  weather.html  power.html  status.html  sun.html  fits.html  about.html
+  common.js               shared front-end helpers
+tools/                  operational scripts
+  fetch_weather.py        real observations from Open-Meteo
+  fetch_fits.py           real spectrograms from the e-Callisto archive
+  simulate_power.py       SIMULATED rail telemetry (no real source exists)
+  migrate_store_layout.py moves an old flat store into year/month/day
+deploy/                 service units and proxy examples
+docs/
+  TECHNICAL-GUIDE.md      how all of it works, in plain language
+  DEPLOYMENT.md           public HTTPS hosting
+data/                   the store (gitignored)
+secrets/                TLS material and token (gitignored)
+```
+
+### The store
+
+Both data stores are laid out **year/month/day**, mirroring the e-Callisto
+archive:
+
+```
+data/weather/2026/08/14/visnjan_weather_20260814.csv
+data/power/2026/08/14/power_20260814.csv
+data/fits/2025/09/09/Croatia-Visnjan_20250909_075911_03.fit.gz
+```
+
+**The repository holds code, never data.** Everything collected lives in
+`data/`, and all secrets in `secrets/` — both gitignored. Clone it anywhere
+and it rebuilds its own data.
+
+---
+
+## The pages
+
+| Page | What it shows |
+|---|---|
+| **Overview** | Everything current, plus where the sun is today |
+| **Weather** | Temperature, dew point, humidity, pressure |
+| **Power** | Volts/amps/watts for heater, LNA, CALLISTO, BME |
+| **Status** | Whether each stream is actually delivering, and daily coverage |
+| **Sun** | Today's sunrise/sunset, and the year's daylight curve |
+| **Spectrograms** | The CALLISTO FITS files, decoded in the browser |
+| **About** | The station's story, the people, and the station log |
+
+---
+
+## Data sources
+
+- **Weather** — real observations for Višnjan from [Open-Meteo](https://open-meteo.com/).
+- **Spectrograms** — real files from the [e-Callisto archive](https://www.e-callisto.org/).
+- **Power** — **simulated.** There is no external source for one station's
+  own rails. `tools/simulate_power.py` says so, and so does its output. The
+  ingest path is real and waiting for the hardware.
+
+---
+
+## Documentation
+
+- **[docs/TECHNICAL-GUIDE.md](docs/TECHNICAL-GUIDE.md)** — how every part
+  works and why, written to be read without knowing the codebase.
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — getting it onto the public
+  internet over HTTPS.
+- **[CHANGELOG.md](CHANGELOG.md)** — every release. Also rendered on the
+  About page's station log.

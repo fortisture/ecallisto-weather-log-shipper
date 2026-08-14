@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>DORM · Sunrise &amp; Sunset</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./common.js"></script>
+  <script src="./vendor/chart.js"></script>
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+    <nav class="site-nav"></nav>
+
+    <header>
+      <div class="id-block">
+        <div class="eyebrow">Višnjan · 45.2775°N 13.7261°E</div>
+        <h1>DORM <span>/ Sunrise &amp; Sunset</span></h1>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="dot" id="status-dot"></span>
+          <span id="connection-status">COMPUTED LOCALLY</span>
+        </div>
+        <div id="sun-today-label">—</div>
+        <div id="sun-zone" class="status-sub">&nbsp;</div>
+      </div>
+    </header>
+
+    <div id="error-panel" class="error-panel"></div>
+
+
+    <!-- ================= TODAY ================= -->
+
+    <section class="panel sun-panel">
+      <div class="panel-head">
+        <span class="label">Today · <span id="sun-date">—</span></span>
+        <span class="tag" id="sun-phase">—</span>
+      </div>
+
+      <div class="sun-body">
+        <div class="sun-arc-wrap">
+          <svg id="sun-arc" viewBox="0 0 720 240" preserveAspectRatio="xMidYMid meet"
+               role="img" aria-labelledby="sun-arc-title">
+            <title id="sun-arc-title">Position of the sun today</title>
+          </svg>
+        </div>
+
+        <div class="sun-facts">
+          <div class="sun-fact">
+            <div class="sf-label">Sunrise</div>
+            <div class="sf-value" id="sun-rise">—</div>
+            <div class="sf-sub" id="sun-rise-utc">&nbsp;</div>
+          </div>
+          <div class="sun-fact">
+            <div class="sf-label">Solar noon</div>
+            <div class="sf-value" id="sun-noon">—</div>
+            <div class="sf-sub" id="sun-noon-utc">&nbsp;</div>
+          </div>
+          <div class="sun-fact">
+            <div class="sf-label">Sunset</div>
+            <div class="sf-value" id="sun-set">—</div>
+            <div class="sf-sub" id="sun-set-utc">&nbsp;</div>
+          </div>
+          <div class="sun-fact">
+            <div class="sf-label">Daylight</div>
+            <div class="sf-value" id="sun-length">—</div>
+            <div class="sf-sub" id="sun-next">&nbsp;</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="twilight-strip">
+        <div><span>Civil dawn</span><b id="sun-dawn">—</b></div>
+        <div><span>Civil dusk</span><b id="sun-dusk">—</b></div>
+        <div><span>Tomorrow's sunrise</span><b id="sun-tomorrow">—</b></div>
+        <div><span>Change vs today</span><b id="sun-delta">—</b></div>
+      </div>
+    </section>
+
+
+    <!-- ================= YEAR ================= -->
+
+    <div class="chart-grid" style="margin-top:18px;">
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">Daylight Hours · <span id="year-label">—</span></span>
+          <span class="tag">HOURS</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="length-chart"></canvas>
+          <div id="chart-fallback" class="chart-fallback">
+            <span class="chart-fallback-dot"></span>
+            CHART LIBRARY UNAVAILABLE
+          </div>
+        </div>
+        <div class="chart-footer">
+          <span id="length-range">—</span>
+          <span id="length-today">—</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">Sunrise &amp; Sunset Times</span>
+          <span class="tag">LOCAL CLOCK</span>
+        </div>
+        <div class="chart-body"><canvas id="times-chart"></canvas></div>
+        <div class="chart-footer">
+          <span>Times shown in observatory local time</span>
+          <span id="times-note">—</span>
+        </div>
+      </section>
+
+    </div>
+
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">How These Are Computed</span>
+        <span class="tag">NO NETWORK CALL</span>
+      </div>
+      <div class="explain-body">
+        Sun times come from the NOAA solar-position algorithm evaluated for
+        the observatory's own coordinates — not from a weather API. The
+        station therefore knows when the sun rises even with no internet at
+        all, which matters because this drives observation scheduling.
+        Accuracy is within a few minutes; the algorithm ignores local
+        terrain, so a hill on the horizon will always delay real sunrise
+        past the computed one.
+      </div>
+    </section>
+
+
+    <footer class="page-footer">
+      DORM GROUND SUPPORT · VIŠNJAN OBSERVATORY · SOLAR EPHEMERIS
+    </footer>
+
+  </div>
+
+
+  <script>
+  /* ==================================================================
+   * Sunrise / sunset.
+   *
+   * Today first, as a picture, because that is the question people
+   * actually have. The year curve is underneath for planning.
+   * ================================================================== */
+
+  const TODAY_URL = "./api/sun/today.json";
+  const YEAR_URL = "./api/sun/year.json";
+
+  const charts = {};
+
+
+  function drawSunArc(sun) {
+    const svg = DORM.el("sun-arc");
+    const W = 720, cy = 186, r = 150, cx = W / 2;
+
+    if (!sun || !sun.sunrise || !sun.sunset) {
+      svg.innerHTML = '<text x="360" y="120" text-anchor="middle" fill="#45525F" ' +
+        'font-family="IBM Plex Mono" font-size="13">NO SOLAR DATA</text>';
+      return;
+    }
+
+    const rise = DORM.parseDate(sun.sunrise).getTime();
+    const set = DORM.parseDate(sun.sunset).getTime();
+    const now = Date.now();
+
+    const frac = (now - rise) / (set - rise);
+    const isDay = frac >= 0 && frac <= 1;
+    const clamped = Math.max(0, Math.min(1, frac));
+
+    const angle = Math.PI * (1 - clamped);
+    const sunX = cx + r * Math.cos(angle);
+    const sunY = cy - r * Math.sin(angle);
+
+    const arcPath = "M " + (cx - r) + " " + cy + " A " + r + " " + r +
+      " 0 0 1 " + (cx + r) + " " + cy;
+
+    const travelled = [];
+    const steps = 60;
+    for (let i = 0; i <= steps * clamped; i++) {
+      const a = Math.PI * (1 - i / steps);
+      travelled.push((i === 0 ? "M " : "L ") +
+        (cx + r * Math.cos(a)) + " " + (cy - r * Math.sin(a)));
+    }
+
+    svg.innerHTML =
+      '<defs>' +
+        '<linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="#4FD8C4" stop-opacity="0.13"/>' +
+          '<stop offset="100%" stop-color="#4FD8C4" stop-opacity="0"/>' +
+        '</linearGradient>' +
+        '<filter id="sunGlow" x="-70%" y="-70%" width="240%" height="240%">' +
+          '<feGaussianBlur stdDeviation="7" result="b"/>' +
+          '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+        '</filter>' +
+      '</defs>' +
+      '<path d="' + arcPath + ' L ' + (cx + r) + ' ' + cy + ' L ' + (cx - r) + ' ' + cy +
+        ' Z" fill="url(#skyGrad)"/>' +
+      '<line x1="' + (cx - r - 26) + '" y1="' + cy + '" x2="' + (cx + r + 26) + '" y2="' + cy +
+        '" stroke="#263140" stroke-width="1"/>' +
+      '<path d="' + arcPath + '" fill="none" stroke="#263140" stroke-width="1.5" stroke-dasharray="3 4"/>' +
+      (travelled.length > 1
+        ? '<path d="' + travelled.join(" ") + '" fill="none" stroke="#4FD8C4" stroke-width="2" ' +
+          'stroke-linecap="round" opacity="0.75"/>'
+        : "") +
+      '<circle cx="' + (cx - r) + '" cy="' + cy + '" r="4" fill="#0A0E13" stroke="#4FD8C4" stroke-width="1.5"/>' +
+      '<circle cx="' + (cx + r) + '" cy="' + cy + '" r="4" fill="#0A0E13" stroke="#E8A855" stroke-width="1.5"/>' +
+      '<text x="' + (cx - r) + '" y="' + (cy + 22) + '" text-anchor="middle" fill="#6B7A8B" ' +
+        'font-family="IBM Plex Mono" font-size="11">' + DORM.localClock(sun.sunrise) + "</text>" +
+      '<text x="' + (cx + r) + '" y="' + (cy + 22) + '" text-anchor="middle" fill="#6B7A8B" ' +
+        'font-family="IBM Plex Mono" font-size="11">' + DORM.localClock(sun.sunset) + "</text>" +
+      (isDay
+        ? '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="#E8A855" filter="url(#sunGlow)"/>' +
+          '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="none" stroke="#0A0E13" stroke-width="2"/>'
+        : '<circle cx="' + cx + '" cy="' + (cy + 20) + '" r="7" fill="#2A3A4A"/>') +
+      '<text x="' + cx + '" y="' + (cy - r - 12) + '" text-anchor="middle" fill="#45525F" ' +
+        'font-family="IBM Plex Mono" font-size="10" letter-spacing="1.5">' +
+        (isDay ? "SUN IS UP" : "BELOW HORIZON") + "</text>";
+  }
+
+
+  function hoursToText(hours) {
+    if (hours === null || hours === undefined) return "—";
+    const h = Math.floor(hours);
+    return h + "h " + Math.round((hours - h) * 60) + "m";
+  }
+
+
+  function renderToday(payload) {
+    const t = payload.today;
+
+    DORM.setText("sun-date", t.date);
+    DORM.setText("sun-today-label", "TODAY " + t.date);
+    DORM.setText("sun-zone", "LOCAL " + DORM.zoneName(new Date()) + " · SOURCE UTC");
+
+    [["sunrise", "sun-rise"], ["solar_noon", "sun-noon"], ["sunset", "sun-set"]]
+      .forEach(([key, id]) => {
+        if (t[key]) {
+          DORM.setText(id, DORM.localClock(t[key]));
+          DORM.setText(id + "-utc", DORM.utcClock(t[key]) + " UTC");
+        }
+      });
+
+    DORM.setText("sun-length", hoursToText(t.day_length_hours));
+    DORM.setText("sun-dawn", t.civil_dawn ? DORM.localClock(t.civil_dawn) : "—");
+    DORM.setText("sun-dusk", t.civil_dusk ? DORM.localClock(t.civil_dusk) : "—");
+
+    const tomorrow = payload.tomorrow;
+    if (tomorrow && tomorrow.sunrise) {
+      DORM.setText("sun-tomorrow", DORM.localClock(tomorrow.sunrise));
+
+      // Whether days are getting longer or shorter, and by how much.
+      if (t.day_length_hours && tomorrow.day_length_hours) {
+        const deltaMin = (tomorrow.day_length_hours - t.day_length_hours) * 60;
+        const sign = deltaMin >= 0 ? "+" : "−";
+        DORM.setText("sun-delta", sign + Math.abs(deltaMin).toFixed(1) + " min daylight");
+      }
+    }
+
+    const now = Date.now();
+    const rise = t.sunrise ? DORM.parseDate(t.sunrise).getTime() : null;
+    const set = t.sunset ? DORM.parseDate(t.sunset).getTime() : null;
+
+    let phase = "NIGHT", next = "";
+    if (rise && now < rise) {
+      phase = "BEFORE SUNRISE";
+      next = "Sunrise in " + DORM.duration((rise - now) / 1000);
+    }
+    else if (rise && set && now >= rise && now <= set) {
+      phase = "DAYLIGHT";
+      next = "Sunset in " + DORM.duration((set - now) / 1000);
+    }
+    else if (tomorrow && tomorrow.sunrise) {
+      phase = "AFTER SUNSET";
+      next = "Sunrise in " +
+        DORM.duration((DORM.parseDate(tomorrow.sunrise).getTime() - now) / 1000);
+    }
+
+    DORM.setText("sun-phase", phase);
+    DORM.setText("sun-next", next);
+
+    drawSunArc(t);
+  }
+
+
+  /* Local clock time as a decimal hour, for plotting. Uses the browser's
+   * own zone so the curve matches the clock on the wall at the site --
+   * including the DST step, which is a real feature of the year and not
+   * an artefact to smooth away. */
+  function localDecimalHour(iso) {
+    const d = DORM.parseDate(iso);
+    return d.getHours() + d.getMinutes() / 60;
+  }
+
+
+  function renderYear(payload) {
+    if (typeof Chart === "undefined") {
+      const fallback = DORM.el("chart-fallback");
+      if (fallback) fallback.style.display = "flex";
+      return;
+    }
+
+    const days = payload.days || [];
+    DORM.setText("year-label", payload.year);
+
+    const labels = days.map(d => d.date.slice(5));
+    const lengths = days.map(d => d.day_length_hours);
+
+    charts.length = DORM.lineChart(DORM.el("length-chart"), labels, lengths, {
+      label: "Daylight",
+      color: DORM.SERIES_COLORS.yellow,
+      unit: "h",
+      decimals: 1,
+      xTicks: 12,
+      showMedian: true
+    });
+
+    const valid = lengths.filter(v => v !== null);
+    if (valid.length) {
+      DORM.setText("length-range",
+        "RANGE " + Math.min(...valid).toFixed(2) + " – " + Math.max(...valid).toFixed(2) + " h");
+    }
+
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayEntry = days.find(d => d.date === todayIso);
+    if (todayEntry) {
+      DORM.setText("length-today", "TODAY " + hoursToText(todayEntry.day_length_hours));
+    }
+
+    // Two series on one axis: both are clock times, same unit, same scale.
+    const ctx = DORM.el("times-chart").getContext("2d");
+    charts.times = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Sunrise",
+            data: days.map(d => d.sunrise ? localDecimalHour(d.sunrise) : null),
+            borderColor: DORM.SERIES_COLORS.blue,
+            borderWidth: 2, pointRadius: 0, pointHoverRadius: 4,
+            fill: false, tension: 0.25, spanGaps: false
+          },
+          {
+            label: "Sunset",
+            data: days.map(d => d.sunset ? localDecimalHour(d.sunset) : null),
+            borderColor: DORM.SERIES_COLORS.orange,
+            borderWidth: 2, pointRadius: 0, pointHoverRadius: 4,
+            fill: false, tension: 0.25, spanGaps: false
+          }
+        ]
+      },
+      options: (function () {
+        const opts = DORM.chartOptions("", 2, { xTicks: 12, min: 0, max: 24 });
+        // Show these as clock times, not decimals: "19:30", not "19.50".
+        opts.scales.y.ticks.callback = value => {
+          const h = Math.floor(value);
+          const m = Math.round((value - h) * 60);
+          return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        };
+        opts.plugins.tooltip.callbacks.label = item => {
+          if (item.parsed.y === null) return "no data";
+          const h = Math.floor(item.parsed.y);
+          const m = Math.round((item.parsed.y - h) * 60);
+          return item.dataset.label + "  " +
+            String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        };
+        return opts;
+      })()
+    });
+
+    const extremes = payload.extremes || {};
+    DORM.setText("times-note", "DST STEP VISIBLE IN LATE MARCH / OCTOBER");
+  }
+
+
+  async function load() {
+    DORM.clearError();
+    try {
+      const [today, year] = await Promise.all([
+        DORM.getJSON(TODAY_URL),
+        DORM.getJSON(YEAR_URL)
+      ]);
+      renderToday(today);
+      renderYear(year);
+      console.log("[DORM] sun ready");
+    }
+    catch (e) {
+      console.error("[DORM] sun failed", e);
+      DORM.showError(e.message);
+    }
+  }
+
+
+  DORM.renderNav("sun.html");
+  load();
+
+  /* The arc tracks the wall clock, so redraw it every minute. */
+  setInterval(() => {
+    DORM.getJSON(TODAY_URL).then(renderToday).catch(() => {});
+  }, 60000);
+  </script>
+
+</body>
+
+</html>

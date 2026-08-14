@@ -21,6 +21,7 @@
   >
 
   <link rel="stylesheet" href="./styles.css">
+  <script src="./common.js"></script>
 
   <script src="./vendor/chart.js"></script>
 
@@ -31,11 +32,7 @@
 
   <div class="wrap">
 
-    <nav class="site-nav">
-      <a href="./index.html">Weather</a>
-      <a href="./power.html" class="is-current" aria-current="page">Power</a>
-      <a href="./fits.html">Spectrograms</a>
-    </nav>
+    <nav class="site-nav"></nav>
 
 
     <header>
@@ -65,12 +62,7 @@
 
       <span class="range-label">Range</span>
 
-      <div class="range-buttons">
-        <button type="button" class="range-btn is-active" data-hours="24">24H</button>
-        <button type="button" class="range-btn" data-hours="168">7D</button>
-        <button type="button" class="range-btn" data-hours="720">30D</button>
-        <button type="button" class="range-btn" data-hours="0">ALL</button>
-      </div>
+      <div class="range-buttons" id="range-buttons"></div>
 
       <span class="range-summary" id="range-summary">—</span>
 
@@ -234,7 +226,8 @@
      */
 
     const LATEST_URL = "./api/power/latest.json";
-    const HISTORY_URL = "./api/power/history.json";
+    const RANGES_URL = "./api/power/ranges.json";
+    const historyUrl = slug => "./api/power/history-" + slug + ".json";
 
     /* Same validated categorical palette as the weather page --
      * checked for colour-blind separation and contrast against this
@@ -252,7 +245,8 @@
     const charts = {};
     let allReadings = [];
     let latestReading = null;
-    let selectedHours = 24;
+    let selectedRange = "24h";
+    let availableRanges = [];
     let lastFetchAt = null;
 
 
@@ -398,32 +392,6 @@
 
 
     // ---------- range ----------
-
-    function readingsInRange(readings, hours) {
-      if (!readings.length) return [];
-      if (!hours || hours <= 0) return readings.slice();
-      const newest = parseDate(readings[readings.length - 1].timestamp).getTime();
-      const cutoff = newest - hours * 3600 * 1000;
-      return readings.filter(r => parseDate(r.timestamp).getTime() >= cutoff);
-    }
-
-    function downsample(readings, maxPoints) {
-      if (readings.length <= maxPoints) return readings;
-      const stride = Math.ceil(readings.length / maxPoints);
-      const out = [];
-      for (let i = 0; i < readings.length; i += stride) out.push(readings[i]);
-      const last = readings[readings.length - 1];
-      if (out[out.length - 1] !== last) out.push(last);
-      return out;
-    }
-
-    function rangeName(hours) {
-      if (!hours || hours <= 0) return "All";
-      if (hours === 24) return "24H";
-      if (hours % 168 === 0) return (hours / 168) + "W";
-      if (hours % 24 === 0) return (hours / 24) + "D";
-      return hours + "H";
-    }
 
 
     // ---------- charts ----------
@@ -620,10 +588,14 @@
 
 
     function renderAll() {
-      const windowed = readingsInRange(allReadings, selectedHours);
-      const plotted = downsample(windowed, MAX_POINTS);
-      const label = rangeName(selectedHours);
-      const longRange = !selectedHours || selectedHours > 48;
+      /* The server already sliced and downsampled this range, so the page
+       * plots exactly what it fetched -- no client-side filtering. */
+      const windowed = allReadings;
+      const plotted = allReadings;
+      const label = selectedRange.toUpperCase();
+
+      const hours = (availableRanges.find(r => r.slug === selectedRange) || {}).hours;
+      const longRange = !hours || hours > 48;
 
       const labels = plotted.map(r => {
         try {
@@ -718,28 +690,50 @@
 
 
     function wireRangeButtons() {
-      document.querySelectorAll(".range-btn").forEach(button => {
-        button.addEventListener("click", () => {
-          document.querySelectorAll(".range-btn").forEach(b => b.classList.remove("is-active"));
-          button.classList.add("is-active");
-          selectedHours = Number(button.dataset.hours);
-          renderAll();
-        });
-      });
+      DORM.buildRangeBar(
+        DORM.el("range-buttons"), availableRanges, selectedRange,
+        slug => { selectedRange = slug; loadRange(); }
+      );
+    }
+
+
+    /* Switching range fetches a different (small) file rather than
+     * re-filtering one big one -- see api.py's write_range_files. */
+    async function loadRange() {
+      try {
+        const history = await DORM.getJSON(historyUrl(selectedRange));
+        allReadings = (history.readings || [])
+          .filter(r => r && r.timestamp)
+          .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+
+        const real = allReadings.filter(r => !r.gap);
+        if (real.length) latestReading = real[real.length - 1];
+
+        renderAll();
+      }
+      catch (e) {
+        console.error("[DORM] range load failed", e);
+        DORM.showError(e.message);
+      }
     }
 
 
     async function loadDashboard() {
       clearError();
       try {
-        const latest = await fetchJSON(LATEST_URL);
-        const history = await fetchJSON(HISTORY_URL);
+        const [latest, ranges] = await Promise.all([
+          fetchJSON(LATEST_URL),
+          DORM.getJSON(RANGES_URL)
+        ]);
 
-        if (!history || !Array.isArray(history.readings)) {
-          throw new Error('history.json must contain: { "readings": [...] }');
+        availableRanges = ranges.ranges || [];
+        if (!availableRanges.some(r => r.slug === selectedRange)) {
+          selectedRange = availableRanges.length ? availableRanges[0].slug : "24h";
         }
+        wireRangeButtons();
 
-        allReadings = history.readings
+        const history = await DORM.getJSON(historyUrl(selectedRange));
+        allReadings = (history.readings || [])
           .filter(r => r && r.timestamp)
           .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
 
@@ -771,13 +765,13 @@
     }
 
 
-    wireRangeButtons();
     loadDashboard();
     setInterval(tickRefreshAge, 1000);
     setInterval(loadDashboard, 60000);
 
   </script>
 
+  <script>DORM.renderNav("web\power.html");</script>
 </body>
 
 </html>

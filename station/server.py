@@ -22,35 +22,34 @@ Dependency-free: standard library only.
     python server.py --http-port 8080
 """
 import argparse
-import importlib.util
 import json
 import os
 import re
 import sys
 import threading
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import api as generator          # noqa: E402
+import receiver                  # noqa: E402
+import status as station_status  # noqa: E402
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WEB_DIR = os.path.join(HERE, "rag-web-ui", "web")
-DEFAULT_WEATHER_DIR = os.path.join(HERE, "data", "weather")
-DEFAULT_FITS_DIR = os.path.join(HERE, "data", "fits")
-DEFAULT_POWER_DIR = os.path.join(HERE, "data", "power")
+ROOT = os.path.dirname(HERE)
+WEB_DIR = os.path.join(ROOT, "web")
+DEFAULT_WEATHER_DIR = os.path.join(ROOT, "data", "weather")
+DEFAULT_FITS_DIR = os.path.join(ROOT, "data", "fits")
+DEFAULT_POWER_DIR = os.path.join(ROOT, "data", "power")
 
 FITS_NAME = re.compile(r"^[A-Za-z0-9-]+_(\d{8})_(\d{6})_\d{2}\.fit\.gz$")
 
 
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
-
-
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 # --------------------------------------------------------------------
@@ -169,7 +168,37 @@ class StationHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
         # The dashboard polls these; stale copies would mask fresh data.
         self.send_header("Cache-Control", "no-store, max-age=0")
+
+        # Hardening headers. Harmless on a LAN, and necessary the moment
+        # this sits behind a public reverse proxy: the page loads no
+        # third-party code, so a strict policy costs nothing here and
+        # blocks an injected <script> from calling home.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "   # the pages carry inline <script>
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'none'; "
+            "form-action 'none'",
+        )
         super().end_headers()
+
+    def list_directory(self, path):
+        """Directory listings are disabled.
+
+        SimpleHTTPRequestHandler happily indexes any folder without an
+        index.html. On a LAN that's a convenience; exposed publicly it
+        enumerates the whole store for anyone who asks.
+        """
+        self.send_error(404, "Not found")
+        return None
 
     def log_message(self, fmt, *args):
         pass  # too chatty; the watcher already reports what matters
@@ -232,6 +261,22 @@ def watch_and_generate(generator, weather_dir, power_dir, api_dir, fits_dir, int
                 )
                 last_fits = fits_state
 
+            # Status and sun are cheap and time-dependent -- "how long
+            # since the last file" changes even when nothing on disk does,
+            # so these rebuild every pass rather than on change.
+            station_status.build_status(
+                api_dir,
+                generator.load_all_readings(weather_dir),
+                generator.load_power_readings(power_dir),
+                read_json(os.path.join(api_dir, "fits", "index.json")) or {},
+            )
+            station_status.build_sun(api_dir)
+            station_status.build_blog(
+                api_dir,
+                os.path.join(ROOT, "CHANGELOG.md"),
+                os.path.join(WEB_DIR, "blog", "posts.json"),
+            )
+
             clean_stale_temp_files(weather_dir, power_dir, fits_dir, api_dir)
 
         except Exception as e:
@@ -245,6 +290,14 @@ def watch_and_generate(generator, weather_dir, power_dir, api_dir, fits_dir, int
             last_fits = None
 
         time.sleep(interval)
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def clean_stale_temp_files(*dirs, max_age=3600):
@@ -284,7 +337,13 @@ def fits_fingerprint(fits_dir):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--http-host", default="0.0.0.0")
+    ap.add_argument(
+        "--http-host",
+        default="0.0.0.0",
+        help="0.0.0.0 exposes the UI on the LAN. Set 127.0.0.1 when a "
+             "reverse proxy (Caddy/nginx/cloudflared) terminates HTTPS in "
+             "front of it, so the plain-HTTP port is not reachable directly.",
+    )
     ap.add_argument("--http-port", type=int, default=8090)
     ap.add_argument("--weather-dir", default=DEFAULT_WEATHER_DIR)
     ap.add_argument("--fits-dir", default=DEFAULT_FITS_DIR)
@@ -302,9 +361,9 @@ def main():
     ap.add_argument("--no-receiver", action="store_true", help="serve only; don't accept Pi uploads")
     ap.add_argument("--receiver-host", default="0.0.0.0")
     ap.add_argument("--receiver-port", type=int, default=9443)
-    ap.add_argument("--cert", default=os.path.join(HERE, "windows", "cert.pem"))
-    ap.add_argument("--key", default=os.path.join(HERE, "windows", "key.pem"))
-    ap.add_argument("--token-file", default=os.path.join(HERE, "windows", "token.txt"))
+    ap.add_argument("--cert", default=os.path.join(ROOT, "secrets", "cert.pem"))
+    ap.add_argument("--key", default=os.path.join(ROOT, "secrets", "key.pem"))
+    ap.add_argument("--token-file", default=os.path.join(ROOT, "secrets", "token.txt"))
     args = ap.parse_args()
 
     weather_dir = os.path.abspath(args.weather_dir)
@@ -316,11 +375,6 @@ def main():
     os.makedirs(power_dir, exist_ok=True)
     os.makedirs(fits_dir, exist_ok=True)
 
-    generator = load_module(
-        "dashboard_api",
-        os.path.join(HERE, "rag-web-ui", "generate_dashboard_api.py"),
-    )
-
     log(f"weather store: {weather_dir}")
     log(f"power store:   {power_dir}")
     log(f"FITS store:    {fits_dir}")
@@ -329,9 +383,9 @@ def main():
         missing = [p for p in (args.cert, args.key, args.token_file) if not os.path.exists(p)]
         if missing:
             log("receiver disabled -- missing " + ", ".join(os.path.basename(m) for m in missing))
-            log("run windows/install_and_run.ps1 to generate them, or pass --no-receiver")
+            log("run deploy/install_receiver.ps1 (or make_secrets) to create them, "
+                "or pass --no-receiver")
         else:
-            receiver = load_module("receiver", os.path.join(HERE, "windows", "receiver.py"))
             thread = threading.Thread(
                 target=run_receiver,
                 args=(receiver, args, weather_dir, power_dir),
@@ -357,7 +411,7 @@ def main():
 
 
 def run_receiver(receiver, args, weather_dir, power_dir):
-    """Drive windows/receiver.py's connection handler on our own socket."""
+    """Drive receiver.py's connection handler on our own socket."""
     import socket
     import ssl
 

@@ -5,6 +5,47 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.0.0] - 2026-08-14
+
+### Changed
+- **Project restructured** into `station/` (server), `web/` (site),
+  `tools/` (operational scripts), `deploy/`, `docs/` and `secrets/`. The
+  old `rag-web-ui/` folder held both Python tooling and the web app, and
+  `windows/` had stopped being Windows-specific. Dynamic module loading in
+  the server is gone — the pieces are now plain imports in one package.
+- **Ingest moved to an SSH tunnel.** The Pi and server sit on different
+  networks with only port 22 open, so the Pi no longer connects to a data
+  port across the internet: it opens an SSH tunnel and reaches a
+  receiver bound to `127.0.0.1`. The TLS, certificate pinning and shared
+  token all stay in place inside the tunnel.
+- The landing page is now a station **overview**; the weather dashboard
+  moved to `weather.html`.
+
+### Added
+- `install.py` — one installer for both machines (`server`, `pi`, `check`,
+  `secrets`). Prints every privileged command before running it.
+- **Pre-computed range files with downsampling.** The API writes one file
+  per range and averages long ranges to ~1200 points, so a page load is
+  bounded regardless of archive age. Weather 24H went from 141 KB (the
+  whole archive) to 4.3 KB.
+- **Overview page** with a live sun-position arc.
+- **Status page**: evidence-based liveness (a stream is up if its data
+  actually arrived) plus per-day coverage against expected sample counts.
+- **Sun page**: NOAA solar ephemeris computed locally for the observatory's
+  coordinates — no network call — with today's detail and the year curve.
+- **About page**: the station's story, sourced biographies, live
+  observation counters, a gallery hook, and a station log that merges the
+  e-Callisto network journal with this project's changelog.
+- `web/common.js` — shared front-end helpers, replacing five copies of the
+  same time/format/chart code.
+- Power page range set is now 1H/2H/6H/24H/7D/ALL, finer than weather's,
+  because rail behaviour changes on the scale of minutes.
+
+### Fixed
+- Solar-time calculation used the Julian Day Number as if it were defined
+  at midnight; it is defined at noon, which put every computed sunrise and
+  sunset 12 hours out.
+
 ## [3.3.0] - 2026-08-13
 
 ### Added

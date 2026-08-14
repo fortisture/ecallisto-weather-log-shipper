@@ -1,34 +1,44 @@
-# M&M Explanation For Dummies
+# DORM Station — Technical Guide
 
-**A complete, plain-English explanation of how this whole thing works and why.**
+**Višnjan Observatory · e-Callisto solar radio spectrometer**
 
-No prior knowledge assumed. If you know what a file and a network are, you
-can read this.
+A complete description of the data pipeline: what each component does, how
+the pieces fit together, and the reasoning behind the design decisions.
+
+Written to be readable without prior knowledge of the codebase. Familiarity
+with files and networking is assumed; nothing beyond that.
+
+| | |
+|---|---|
+| **Station** | Croatia-Višnjan (DORM) |
+| **Instruments** | CALLISTO spectrometer, BME environmental sensor, weather station |
+| **Repository** | <https://github.com/fortisture/ecallisto-weather-log-shipper> |
+| **Deployment** | See [DEPLOYMENT.md](DEPLOYMENT.md) |
 
 ---
 
 ## Table of contents
 
-1. [The one-paragraph version](#1-the-one-paragraph-version)
-2. [The problem this solves](#2-the-problem-this-solves)
-3. [The big picture](#3-the-big-picture)
-4. [Part one: the sender (on the Pi)](#4-part-one-the-sender-on-the-pi)
-5. [Part two: the receiver (on the PC)](#5-part-two-the-receiver-on-the-pc)
-6. [Part three: the security model](#6-part-three-the-security-model)
-7. [Part four: the server that ties it together](#7-part-four-the-server-that-ties-it-together)
-8. [Part five: turning CSV into something a webpage can use](#8-part-five-turning-csv-into-something-a-webpage-can-use)
-9. [Part six: the weather dashboard](#9-part-six-the-weather-dashboard)
-9b. [The power page](#9b-the-power-page)
-10. [Part seven: the spectrogram viewer](#10-part-seven-the-spectrogram-viewer)
-11. [Part eight: the helper scripts](#11-part-eight-the-helper-scripts)
-12. [How to run the whole thing](#12-how-to-run-the-whole-thing)
-13. [Every design decision, and why](#13-every-design-decision-and-why)
-14. [Bugs found and fixed along the way](#14-bugs-found-and-fixed-along-the-way)
-15. [Things you should know that might bite you](#15-things-you-should-know-that-might-bite-you)
+1. [Summary](#1-summary)
+2. [Rationale](#2-rationale)
+3. [System overview](#3-system-overview)
+4. [The sender (Raspberry Pi)](#4-the-sender-raspberry-pi)
+5. [The receiver (server)](#5-the-receiver-server)
+6. [Security model](#6-security-model)
+7. [The station server](#7-the-station-server)
+8. [Data preparation: CSV to JSON](#8-data-preparation-csv-to-json)
+9. [The weather dashboard](#9-the-weather-dashboard)
+10. [The power dashboard](#10-the-power-dashboard)
+11. [The spectrogram viewer](#11-the-spectrogram-viewer)
+12. [Supporting scripts](#12-supporting-scripts)
+13. [Operation](#13-operation)
+14. [Design decisions](#14-design-decisions)
+15. [Defects identified and resolved](#15-defects-identified-and-resolved)
+16. [Known limitations](#16-known-limitations)
 
 ---
 
-## 1. The one-paragraph version
+## 1. Summary
 
 A Raspberry Pi at the Višnjan observatory records weather readings into CSV
 files and solar radio spectrograms into FITS files. A program on the Pi
@@ -42,27 +52,27 @@ copy of everything, so the website works even when the Pi is switched off.
 
 ---
 
-## 2. The problem this solves
+## 2. Rationale
 
-The Pi is a small computer sitting at the observatory. It is recording data
-constantly. Three things could go wrong if you just left the data there:
+The Raspberry Pi at the observatory records continuously. Leaving the data
+there alone presents three problems:
 
-1. **SD cards die.** Raspberry Pis store data on SD cards, which wear out.
-   Years of observations on one card is a single point of failure.
-2. **You can't see it.** To look at your data you'd have to log into the Pi
-   every time.
-3. **The Pi is slow.** Asking it to also serve a website with charts is
-   asking a lot from a small machine that has a real job already.
+1. **Storage reliability.** The Pi writes to an SD card, which has a finite
+   write life. Years of observations on a single card is an unmitigated
+   single point of failure.
+2. **Accessibility.** Inspecting the data requires logging into the Pi.
+3. **Capacity.** Serving a charting web application competes with the
+   instrument duties the Pi already performs.
 
-So: copy the data off the Pi continuously, onto a machine with a real disk
-and a real screen, and do all the presentation work there.
+The system therefore replicates data off the Pi continuously to a machine
+with durable storage, and performs all presentation work there.
 
-The key word is **continuously**. Not "once a day," not "when I remember."
-Every row, seconds after it's recorded.
+**Continuously** is the operative constraint: every row is transmitted
+within seconds of being written, not batched daily or on demand.
 
 ---
 
-## 3. The big picture
+## 3. System overview
 
 ```
    RASPBERRY PI (at the observatory)         WINDOWS PC (your machine)
@@ -91,42 +101,42 @@ Every row, seconds after it's recorded.
                                             └────────────────────────┘
 ```
 
-Four ideas hold this together:
+Four principles govern the design:
 
-- **The Pi only pushes.** It never waits to be asked. The instant a row
-  appears, it goes out.
-- **The PC keeps its own copy.** Once data is on the PC it lives in
-  `data/`, independent of the Pi. Unplug the Pi and the website still works.
-- **The website reads files, not a database.** No database to install,
+- **The Pi pushes; it is never polled.** A row is transmitted as soon as it
+  appears.
+- **The server holds an independent copy.** Received data lives in `data/`
+  and does not depend on the Pi remaining reachable; the site continues to
+  serve history if the Pi is offline.
+- **The web layer reads files, not a database.** Nothing to install,
   configure, back up, or corrupt.
-- **Nothing needs installing.** Both programs use only what comes with
-  Python. No `pip install`. Nothing to break on an OS upgrade.
+- **No third-party dependencies.** Both programs use only the Python
+  standard library, so an OS or package upgrade cannot break them.
 
 ---
 
-## 4. Part one: the sender (on the Pi)
+## 4. The sender (Raspberry Pi)
 
 **File: `pi/sender.py`**
 
-Its whole job: notice when a weather CSV changes, and send the change.
+**Responsibility:** detect changes to the weather CSV files and transmit them.
 
 ### How it notices changes
 
 Every second it looks at each `*.csv` file in the watched folder and asks:
 "is this the same as when I last looked?"
 
-The naive way to answer is to check the file size. Bigger = new data. That
-works right up until someone *edits* a row that's already there — the size
-doesn't change, or changes in a way that doesn't tell you what happened. A
-size check would miss the edit entirely and you'd never know your copy had
-gone stale.
+Comparing file size is insufficient. It detects appended data, but an
+in-place edit to an existing row may not change the size at all, and a size
+change alone does not indicate *what* changed. A size check would miss such
+an edit silently, leaving the server's copy stale with no indication.
 
-So instead it uses a **hash**: a short fingerprint calculated from the
-file's contents. Change one character anywhere and the fingerprint changes
-completely. The sender remembers the fingerprint of exactly what it has
-already sent, and each second it recalculates and compares.
+The sender therefore uses a **cryptographic hash** — a fixed-length
+fingerprint derived from the file's contents, where any single-character
+change produces an entirely different result. The sender records the hash of
+exactly what it has transmitted and recomputes it each poll.
 
-Here is the actual comparison, from `pi/sender.py`:
+The comparison, from `pi/sender.py`:
 
 ```python
 prev = state.get(name, {"length": 0, "hash": EMPTY_HASH})
@@ -145,12 +155,12 @@ else:
     ...
 ```
 
-The key line is `data[:prev_len]` — "the first N bytes, where N is how much
-I'd already sent." If hashing *that slice* still matches, nothing old
-changed and only the tail is new. If it doesn't match, something was edited
-underneath us.
+The significant expression is `data[:prev_len]` — the first N bytes, where N
+is the amount already transmitted. If the hash of that slice still matches,
+nothing previously sent has changed and only the tail is new. A mismatch
+indicates the transmitted region was modified.
 
-That comparison has three possible outcomes:
+The comparison yields three outcomes:
 
 | What it finds | What it means | What it does |
 |---|---|---|
@@ -158,10 +168,10 @@ That comparison has three possible outcomes:
 | The file *starts with* what was already sent, and has extra on the end | Normal case: new rows appended | Send only the new rows |
 | Anything else | A row was edited, or the file got shorter | Send the **whole file** |
 
-That second case is the common one and it's cheap — a new row is a few
-dozen bytes. The third case is the safety net: if anything about the
-already-sent portion changed, the sender stops trying to be clever and
-re-sends everything, and the receiver replaces its copy wholesale.
+The second case is the common one and is inexpensive, a row being a few
+dozen bytes. The third is the correctness fallback: if any transmitted
+region has changed, the sender abandons incremental transfer and resends the
+file in full, and the receiver replaces its copy wholesale.
 
 ### How it never loses or duplicates a row
 
@@ -169,7 +179,7 @@ The sender keeps a small file (`state.json`) recording how far it has got
 in each file. It updates that record **after every single row it sends**,
 not at the end of a batch.
 
-Why that matters: suppose the network drops halfway through sending 50
+This matters because: suppose the network drops halfway through sending 50
 rows. If the record were only written at the end, the sender would restart
 and re-send all 50, and you'd get duplicates. If it were written at the
 start, the interrupted rows would be skipped forever. Writing after each
@@ -208,7 +218,7 @@ the PC comes back, everything buffered up since the outage is sent.
 
 ---
 
-## 5. Part two: the receiver (on the PC)
+## 5. The receiver (server)
 
 **File: `windows/receiver.py`**
 
@@ -324,7 +334,7 @@ in an editor at the time.
 
 ---
 
-## 6. Part three: the security model
+## 6. Security model
 
 The data crosses your local network. Three independent protections, each
 covering a different failure:
@@ -400,7 +410,7 @@ code is useless to anyone without your keys.
 
 ---
 
-## 7. Part four: the server that ties it together
+## 7. The station server
 
 **File: `server.py`** — the single command that runs the whole ground station.
 
@@ -490,7 +500,7 @@ have is cheaper than trying to find out.
 
 ---
 
-## 8. Part five: turning CSV into something a webpage can use
+## 8. Data preparation: CSV to JSON
 
 **File: `rag-web-ui/generate_dashboard_api.py`**
 
@@ -564,7 +574,7 @@ visual break rather than a line drawn straight through them.
 
 ---
 
-## 9. Part six: the weather dashboard
+## 9. The weather dashboard
 
 **Files: `rag-web-ui/web/index.html`, `styles.css`**
 
@@ -643,7 +653,7 @@ property for equipment at a remote observatory.
 
 ---
 
-## 9b. The power page
+## 10. The power dashboard
 
 **File: `rag-web-ui/web/power.html`**
 
@@ -732,7 +742,7 @@ and the supply voltage dips slightly when the heater pulls hard — the way
 a real 12 V rail behaves. Delete this script once the real hardware
 reports.
 
-## 10. Part seven: the spectrogram viewer
+## 11. The spectrogram viewer
 
 **File: `rag-web-ui/web/fits.html`**
 
@@ -910,7 +920,7 @@ down, which is something you want to see rather than have hidden.
 
 ---
 
-## 11. Part eight: the helper scripts
+## 12. Supporting scripts
 
 - **`rag-web-ui/fetch_visnjan_fits.py`** — downloads real spectrograms from
   the central e-Callisto archive. Skips files it already has (the archive
@@ -932,7 +942,7 @@ down, which is something you want to see rather than have hidden.
 
 ---
 
-## 12. How to run the whole thing
+## 13. Operation
 
 **On the PC (once):**
 
@@ -970,7 +980,7 @@ python rag-web-ui/fetch_visnjan_fits.py --days 3
 
 ---
 
-## 13. Every design decision, and why
+## 14. Design decisions
 
 | Decision | Why |
 |---|---|
@@ -1005,7 +1015,7 @@ python rag-web-ui/fetch_visnjan_fits.py --days 3
 
 ---
 
-## 14. Bugs found and fixed along the way
+## 15. Defects identified and resolved
 
 Real bugs, found by testing rather than reading:
 
@@ -1066,7 +1076,7 @@ Real bugs, found by testing rather than reading:
 
 ---
 
-## 15. Things you should know that might bite you
+## 16. Known limitations
 
 - **The Višnjan CALLISTO station appears to have been offline since
   September 2025.** The archive has data for 2024-08-11, mid-2025, and

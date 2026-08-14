@@ -293,6 +293,9 @@ def generate_power(power_dir, api_dir):
         "subsystems": [{"key": key, "label": label} for key, label in SUBSYSTEMS],
         "readings": readings,
     })
+
+    rail_fields = [f"{key}_{suffix}" for key, _ in SUBSYSTEMS for suffix in ("v", "ma")]
+    write_range_files(readings, api_dir, POWER_RANGES, rail_fields)
     return len(readings)
 
 
@@ -329,7 +332,113 @@ def generate(incoming_dir, api_dir, history_hours):
 
     write_json_atomic(os.path.join(api_dir, "latest.json"), latest_out)
     write_json_atomic(os.path.join(api_dir, "history.json"), {"readings": history_readings})
+    write_range_files(history_readings, api_dir, WEATHER_RANGES, fields)
     return len(readings), len(history_readings)
+
+
+# --------------------------------------------------------------------
+# Pre-computed ranges
+# --------------------------------------------------------------------
+
+# Ranges each page offers, as (slug, hours). hours <= 0 means "everything".
+# Power gets finer short ranges because rail behaviour (heater duty
+# cycling, a brownout) happens on the scale of minutes, where weather does
+# not.
+WEATHER_RANGES = (("24h", 24), ("7d", 168), ("30d", 720), ("all", 0))
+POWER_RANGES = (("1h", 1), ("2h", 2), ("6h", 6), ("24h", 24), ("7d", 168), ("all", 0))
+
+# No chart is more than ~1200 px wide, so more points than this cannot be
+# distinguished on screen -- they only cost download size and render time.
+MAX_POINTS_PER_RANGE = 1200
+
+
+def slice_hours(readings, hours):
+    if not readings or hours <= 0:
+        return list(readings)
+
+    newest = to_epoch(readings[-1]["timestamp"])
+    cutoff = newest - hours * 3600
+    return [r for r in readings if to_epoch(r["timestamp"]) >= cutoff]
+
+
+def downsample(readings, max_points, value_keys):
+    """Reduce to at most max_points, averaging each bucket.
+
+    Averaging rather than taking every Nth sample: dropping samples can
+    drop the one that mattered, and on a long range that silently removes
+    real extremes. Averaging keeps every measurement represented.
+
+    Gap markers are preserved as-is and break buckets, so an outage stays
+    visible instead of being averaged away.
+    """
+    if len(readings) <= max_points:
+        return list(readings)
+
+    stride = len(readings) / max_points
+    out = []
+    bucket = []
+
+    def flush():
+        if not bucket:
+            return
+        merged = {"timestamp": bucket[len(bucket) // 2]["timestamp"]}
+        for key in value_keys:
+            values = [r[key] for r in bucket if r.get(key) is not None]
+            merged[key] = round(sum(values) / len(values), 3) if values else None
+        if len(bucket) > 1:
+            merged["n"] = len(bucket)
+        out.append(merged)
+        bucket.clear()
+
+    target = stride
+    for i, reading in enumerate(readings):
+        if reading.get("gap"):
+            flush()
+            out.append(reading)
+            target = i + 1 + stride
+            continue
+
+        bucket.append(reading)
+        if i + 1 >= target:
+            flush()
+            target += stride
+
+    flush()
+    return out
+
+
+def write_range_files(readings, api_dir, ranges, value_keys):
+    """Emit one file per range so a page downloads only what it shows.
+
+    Without this the browser fetches the entire archive on every load and
+    filters client-side, which is fine at a few hundred KB and untenable
+    after a year of minute-resolution logging.
+    """
+    written = {}
+
+    for slug, hours in ranges:
+        windowed = slice_hours(readings, hours)
+        reduced = downsample(windowed, MAX_POINTS_PER_RANGE, value_keys)
+
+        payload = {
+            "range": slug,
+            "hours": hours,
+            "readings": reduced,
+            "source_readings": len(windowed),
+            "downsampled": len(reduced) < len(windowed),
+        }
+        write_json_atomic(os.path.join(api_dir, f"history-{slug}.json"), payload)
+        written[slug] = len(reduced)
+
+    # An index so the page can render its range buttons from the API
+    # rather than hard-coding a list that could drift out of step.
+    write_json_atomic(os.path.join(api_dir, "ranges.json"), {
+        "ranges": [
+            {"slug": slug, "hours": hours, "points": written.get(slug, 0)}
+            for slug, hours in ranges
+        ]
+    })
+    return written
 
 
 def hash_dir(incoming_dir):

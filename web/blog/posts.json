@@ -1,0 +1,51 @@
+{
+  "_comment": "Station log. 'station' entries are quoted from the e-Callisto network journal at https://www.e-callisto.org/Journal.html and describe the instrument itself. 'site' entries are changes to this monitoring software. Add new entries at the top.",
+
+  "posts": [
+    {
+      "date": "2025-08-22",
+      "kind": "station",
+      "title": "New log-periodic antenna and rotator gearing",
+      "body": "A new LPDA went up, together with a 3D-printed shroud protecting the feedpoint connector from weather. The rotator's encoder and gear assembly were rebuilt at the same time.",
+      "quote": "Croatia new LPDA incl. 3D-printed connector-protection. New encoder/gear construction",
+      "source": "e-Callisto network journal",
+      "source_url": "https://www.e-callisto.org/Journal.html"
+    },
+    {
+      "date": "2025-01-05",
+      "kind": "station",
+      "title": "Back on-line, and quiet",
+      "body": "The station returned to service after a break, and — the part that matters for a radio site — with low interference. Clean spectra depend far more on the local RFI environment than on the receiver itself.",
+      "quote": "Croatia Visnjan back on-line with nice results and low rfi",
+      "source": "e-Callisto network journal",
+      "source_url": "https://www.e-callisto.org/Journal.html"
+    },
+    {
+      "date": "2024-08-11",
+      "kind": "station",
+      "title": "First light",
+      "body": "At 07:41 UT the station recorded its first real solar observation. This is the date the archive counts from, and every spectrogram on this site is measured against it.",
+      "quote": "Croatia-Visnjan 1st light at 07:41",
+      "source": "e-Callisto network journal",
+      "source_url": "https://www.e-callisto.org/Journal.html"
+    },
+    {
+      "date": "2024-04-05",
+      "kind": "station",
+      "title": "Continuous upload begins",
+      "body": "The station moved from occasional test files to uploading continuously, which is what makes a station useful to the network: the value of e-Callisto is that some station somewhere is always watching.",
+      "quote": "Croatia-Visnjan starting with continous files upload",
+      "source": "e-Callisto network journal",
+      "source_url": "https://www.e-callisto.org/Journal.html"
+    },
+    {
+      "date": "2024-04-04",
+      "kind": "station",
+      "title": "First files reach the archive",
+      "body": "The first data from Croatia-Visnjan arrived at the central archive — the point at which the station existed as far as the rest of the network was concerned.",
+      "quote": "First files from Croatia-Visnjan",
+      "source": "e-Callisto network journal",
+      "source_url": "https://www.e-callisto.org/Journal.html"
+    }
+  ]
+}

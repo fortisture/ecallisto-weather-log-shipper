@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>DORM · Station Status</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./common.js"></script>
+  <script src="./vendor/chart.js"></script>
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+    <nav class="site-nav"></nav>
+
+    <header>
+      <div class="id-block">
+        <div class="eyebrow">Višnjan · Station Health</div>
+        <h1>DORM <span>/ Uptime &amp; Availability</span></h1>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="dot" id="status-dot"></span>
+          <span id="connection-status">CHECKING</span>
+        </div>
+        <div id="checked-at">—</div>
+        <div id="checked-local" class="status-sub">&nbsp;</div>
+      </div>
+    </header>
+
+    <div id="error-panel" class="error-panel"></div>
+
+
+    <!-- ============ HOW THIS IS MEASURED ============ -->
+
+    <section class="panel">
+      <div class="panel-head">
+        <span class="label">Live Check</span>
+        <span class="tag">EVIDENCE-BASED</span>
+      </div>
+
+      <div class="explain-body">
+        A station is judged up or down by <strong>what actually arrived</strong>,
+        not by a ping. Each stream has an expected cadence; if data stops
+        showing up for several times that interval, the stream is late, and
+        well past that it is down. The instrument stream is the one that
+        decides the station's overall state — weather still flowing while
+        CALLISTO is silent is exactly the failure this page exists to catch.
+      </div>
+
+      <div class="stream-strip" id="stream-strip"></div>
+    </section>
+
+
+    <!-- ============ COVERAGE SUMMARY ============ -->
+
+    <div class="chart-grid" style="margin-top:18px;">
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">CALLISTO Coverage</span>
+          <span class="tag">% OF 96 DAILY SWEEPS</span>
+        </div>
+        <div class="chart-body">
+          <canvas id="fits-chart"></canvas>
+          <div id="chart-fallback" class="chart-fallback">
+            <span class="chart-fallback-dot"></span>
+            CHART LIBRARY UNAVAILABLE
+          </div>
+        </div>
+        <div class="chart-footer">
+          <span id="fits-summary">—</span>
+          <span id="fits-days">—</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">Weather Coverage</span>
+          <span class="tag">% OF EXPECTED ROWS</span>
+        </div>
+        <div class="chart-body"><canvas id="weather-chart"></canvas></div>
+        <div class="chart-footer">
+          <span id="weather-summary">—</span>
+          <span id="weather-days">—</span>
+        </div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-head">
+          <span class="label">Power Coverage</span>
+          <span class="tag">% OF EXPECTED ROWS</span>
+        </div>
+        <div class="chart-body"><canvas id="power-chart"></canvas></div>
+        <div class="chart-footer">
+          <span id="power-summary">—</span>
+          <span id="power-days">—</span>
+        </div>
+      </section>
+
+    </div>
+
+
+    <!-- ============ DAY GRID ============ -->
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">Observation Calendar</span>
+        <span class="tag" id="calendar-tag">—</span>
+      </div>
+      <div class="calendar-body">
+        <div class="heat-grid" id="heat-grid"></div>
+        <div class="calendar-legend">
+          <span><span class="legend-swatch heat-0"></span> none</span>
+          <span><span class="legend-swatch heat-1"></span> &lt; 25%</span>
+          <span><span class="legend-swatch heat-2"></span> 25–75%</span>
+          <span><span class="legend-swatch heat-3"></span> &gt; 75%</span>
+        </div>
+      </div>
+    </section>
+
+
+    <footer class="page-footer">
+      DORM GROUND SUPPORT · VIŠNJAN · UPTIME FROM DELIVERED DATA
+    </footer>
+
+  </div>
+
+
+  <script>
+  /* ==================================================================
+   * Station status.
+   *
+   * "Uptime" for a logging station is not whether a machine answers a
+   * ping -- it is whether the data it was supposed to record exists. So
+   * every number here is derived from files on disk: how recently each
+   * stream delivered, and what fraction of each day's expected samples
+   * actually arrived.
+   * ================================================================== */
+
+  const STATUS_URL = "./api/status/latest.json";
+  const HISTORY_URL = "./api/status/history.json";
+
+  const STREAM_LABEL = {
+    weather: "Weather station",
+    power: "Power rails",
+    fits: "CALLISTO spectrometer"
+  };
+
+  const STATE_TEXT = {
+    "up": "ONLINE", "late": "LATE", "down": "OFFLINE", "no-data": "NO DATA"
+  };
+
+  const SERIES = [
+    { key: "fits", canvas: "fits-chart", color: DORM.SERIES_COLORS.teal },
+    { key: "weather", canvas: "weather-chart", color: DORM.SERIES_COLORS.blue },
+    { key: "power", canvas: "power-chart", color: DORM.SERIES_COLORS.orange }
+  ];
+
+  const charts = {};
+
+
+  function renderStreams(status) {
+    DORM.el("stream-strip").innerHTML = (status.streams || []).map(s => {
+      const expected = DORM.duration(s.stale_after_seconds);
+      return '<div class="stream-cell is-' + s.state + '">' +
+        '<div class="stream-name">' + (STREAM_LABEL[s.stream] || s.stream) + "</div>" +
+        '<div class="stream-state">' + (STATE_TEXT[s.state] || s.state) + "</div>" +
+        '<div class="stream-sub">' +
+          (s.last_seen
+            ? "last data " + DORM.duration(s.age_seconds) + " ago<br>" +
+              "expected within " + expected
+            : "never seen") +
+        "</div></div>";
+    }).join("");
+
+    const overall = STATE_TEXT[status.overall] || status.overall;
+    DORM.setText("connection-status", "STATION: " + overall);
+
+    const dot = DORM.el("status-dot");
+    dot.style.background = status.overall === "up"
+      ? "var(--signal)"
+      : (status.overall === "late" ? "var(--warn)" : "#E85D5D");
+
+    if (status.generated) {
+      DORM.setText("checked-at", "CHECKED " + DORM.utcStamp(status.generated));
+      DORM.setText("checked-local", "LOCAL " + DORM.localStamp(status.generated));
+    }
+  }
+
+
+  function renderCoverage(history) {
+    const days = history.days || [];
+    const labels = days.map(d => d.slice(5));
+
+    SERIES.forEach(series => {
+      const entries = (history.series || {})[series.key] || [];
+      const values = entries.map(e => e.coverage_pct);
+      const canvas = DORM.el(series.canvas);
+      if (!canvas) return;
+
+      if (typeof Chart === "undefined") {
+        const fallback = DORM.el("chart-fallback");
+        if (fallback) fallback.style.display = "flex";
+        return;
+      }
+
+      const spec = {
+        label: "Coverage",
+        color: series.color,
+        unit: "%",
+        decimals: 0,
+        min: 0,
+        max: 100,
+        /* Stepped: coverage is a per-day figure, not a continuous
+         * quantity. Interpolating between days would imply a smooth
+         * change that the measurement does not support. */
+        stepped: true,
+        showMedian: true
+      };
+
+      if (charts[series.key]) {
+        DORM.updateChart(charts[series.key], labels, values, spec);
+      }
+      else {
+        charts[series.key] = DORM.lineChart(canvas, labels, values, spec);
+      }
+
+      const summary = (history.summary || {})[series.key];
+      if (summary) {
+        DORM.setText(series.key + "-summary",
+          "MEAN " + summary.mean_coverage_pct + "%");
+        DORM.setText(series.key + "-days",
+          summary.days_with_data + " / " + summary.days_total + " DAYS");
+      }
+    });
+  }
+
+
+  /* A day grid, because a long series of mostly-100% days reads better
+   * as a block of colour than as a flat line. */
+  function renderHeatGrid(history) {
+    const entries = (history.series || {}).fits || [];
+    const grid = DORM.el("heat-grid");
+
+    grid.innerHTML = entries.map(e => {
+      let level = 0;
+      if (e.coverage_pct > 75) level = 3;
+      else if (e.coverage_pct >= 25) level = 2;
+      else if (e.coverage_pct > 0) level = 1;
+
+      return '<span class="heat-cell heat-' + level + '" title="' +
+        e.date + " — " + e.count + " / " + e.expected + " sweeps (" +
+        e.coverage_pct + '%)"></span>';
+    }).join("");
+
+    const recorded = entries.filter(e => e.count > 0).length;
+    DORM.setText("calendar-tag", recorded + " OF " + entries.length + " DAYS RECORDED");
+  }
+
+
+  async function load() {
+    DORM.clearError();
+    try {
+      const [status, history] = await Promise.all([
+        DORM.getJSON(STATUS_URL),
+        DORM.getJSON(HISTORY_URL)
+      ]);
+
+      renderStreams(status);
+      renderCoverage(history);
+      renderHeatGrid(history);
+
+      console.log("[DORM] status ready:", status.overall);
+    }
+    catch (e) {
+      console.error("[DORM] status failed", e);
+      DORM.showError(e.message);
+    }
+  }
+
+
+  DORM.renderNav("status.html");
+  load();
+  setInterval(load, 60000);
+  </script>
+
+</body>
+
+</html>

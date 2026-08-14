@@ -88,9 +88,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=int, default=35)
     ap.add_argument("--interval-minutes", type=float, default=15.0)
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "data", "power"))
+    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "power"))
     ap.add_argument("--weather-dir",
-                    default=os.path.join(os.path.dirname(__file__), "..", "data", "weather"))
+                    default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "weather"))
     ap.add_argument("--seed", type=int, default=5)
     args = ap.parse_args()
 

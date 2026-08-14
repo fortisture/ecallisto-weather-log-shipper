@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>DORM · Višnjan Station</title>
+
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A0E13'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%234FD8C4' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2.4' fill='%234FD8C4'/%3E%3C/svg%3E"
+  >
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./common.js"></script>
+
+</head>
+
+
+<body>
+
+  <div class="wrap">
+
+    <nav class="site-nav"></nav>
+
+
+    <header>
+
+      <div class="id-block">
+        <div class="eyebrow">Višnjan Observatory · Istria, Croatia</div>
+        <h1>DORM <span>/ Station Overview</span></h1>
+      </div>
+
+      <div class="status-block">
+        <div class="status-line">
+          <span class="dot" id="status-dot"></span>
+          <span id="connection-status">INITIALIZING</span>
+        </div>
+        <div id="overview-updated">READING STATION DATA</div>
+        <div id="overview-local" class="status-sub">&nbsp;</div>
+      </div>
+
+    </header>
+
+
+    <div id="error-panel" class="error-panel"></div>
+
+
+    <!-- ================= SUN VISUAL ================= -->
+
+    <section class="panel sun-panel">
+
+      <div class="panel-head">
+        <span class="label">Daylight · <span id="sun-date">—</span></span>
+        <span class="tag" id="sun-phase">—</span>
+      </div>
+
+      <div class="sun-body">
+
+        <div class="sun-arc-wrap">
+          <svg id="sun-arc" viewBox="0 0 720 240" preserveAspectRatio="xMidYMid meet"
+               role="img" aria-labelledby="sun-arc-title">
+            <title id="sun-arc-title">Position of the sun today</title>
+          </svg>
+        </div>
+
+        <div class="sun-facts">
+          <div class="sun-fact">
+            <div class="sf-label">Sunrise</div>
+            <div class="sf-value" id="sun-rise">—</div>
+            <div class="sf-sub" id="sun-rise-utc">&nbsp;</div>
+          </div>
+          <div class="sun-fact">
+            <div class="sf-label">Solar noon</div>
+            <div class="sf-value" id="sun-noon">—</div>
+            <div class="sf-sub" id="sun-noon-utc">&nbsp;</div>
+          </div>
+          <div class="sun-fact">
+            <div class="sf-label">Sunset</div>
+            <div class="sf-value" id="sun-set">—</div>
+            <div class="sf-sub" id="sun-set-utc">&nbsp;</div>
+          </div>
+          <div class="sun-fact">
+            <div class="sf-label">Daylight</div>
+            <div class="sf-value" id="sun-length">—</div>
+            <div class="sf-sub" id="sun-next">&nbsp;</div>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- ================= CURRENT CONDITIONS ================= -->
+
+    <div class="overview-grid">
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="label">Weather</span>
+          <span class="tag" id="weather-age">—</span>
+        </div>
+
+        <div class="ov-hero">
+          <span class="ov-value" id="ov-temp">—</span>
+          <span class="ov-unit">°C</span>
+        </div>
+
+        <div class="ov-rows">
+          <div><span>Dew point</span><b id="ov-dew">—</b></div>
+          <div><span>Humidity</span><b id="ov-humidity">—</b></div>
+          <div><span>Pressure</span><b id="ov-pressure">—</b></div>
+        </div>
+
+        <a class="ov-link" href="./weather.html">Weather detail →</a>
+      </section>
+
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="label">Power</span>
+          <span class="tag" id="power-age">—</span>
+        </div>
+
+        <div class="ov-hero">
+          <span class="ov-value" id="ov-watts">—</span>
+          <span class="ov-unit">W</span>
+        </div>
+
+        <div class="ov-rows" id="ov-rails"></div>
+
+        <a class="ov-link" href="./power.html">Power detail →</a>
+      </section>
+
+
+      <section class="panel">
+        <div class="panel-head">
+          <span class="label">Instrument</span>
+          <span class="tag" id="fits-age">—</span>
+        </div>
+
+        <div class="ov-hero">
+          <span class="ov-value" id="ov-sweeps">—</span>
+          <span class="ov-unit">sweeps</span>
+        </div>
+
+        <div class="ov-rows">
+          <div><span>Observation days</span><b id="ov-days">—</b></div>
+          <div><span>Archive span</span><b id="ov-span">—</b></div>
+          <div><span>Coverage (30d)</span><b id="ov-coverage">—</b></div>
+        </div>
+
+        <a class="ov-link" href="./fits.html">Spectrograms →</a>
+      </section>
+
+    </div>
+
+
+    <!-- ================= STREAM STATUS ================= -->
+
+    <section class="panel" style="margin-top:18px;">
+      <div class="panel-head">
+        <span class="label">Data Streams</span>
+        <span class="tag"><a class="ov-link-inline" href="./status.html">Full status →</a></span>
+      </div>
+      <div class="stream-strip" id="stream-strip"></div>
+    </section>
+
+
+    <footer class="page-footer">
+      DORM GROUND SUPPORT · VIŠNJAN OBSERVATORY · 45.2775°N 13.7261°E
+    </footer>
+
+  </div>
+
+
+  <script>
+  /* ==================================================================
+   * Station overview.
+   *
+   * Everything current, in one place: the sun's position today, the
+   * latest weather and power readings, and whether each data stream is
+   * actually delivering.
+   *
+   * This page deliberately does NOT auto-refresh yet. The data behind it
+   * is a static demo set, so a countdown that never changes would be
+   * theatre. refreshAll() is written to be re-runnable, so switching it
+   * on later is one setInterval call -- see the note at the bottom.
+   * ================================================================== */
+
+  const SUN_URL = "./api/sun/today.json";
+  const WEATHER_URL = "./api/weather/latest.json";
+  const POWER_URL = "./api/power/latest.json";
+  const STATUS_URL = "./api/status/latest.json";
+  const FITS_URL = "./api/fits/index.json";
+
+  const STREAM_LABEL = {
+    weather: "Weather station",
+    power: "Power rails",
+    fits: "CALLISTO spectrometer"
+  };
+
+  const STATE_TEXT = {
+    "up": "ONLINE",
+    "late": "LATE",
+    "down": "OFFLINE",
+    "no-data": "NO DATA"
+  };
+
+
+  /* ---------------- the sun arc ----------------
+   * An arc from sunrise to sunset with the sun's current position on it,
+   * because "where are we in the day" is read far faster from a picture
+   * than from three timestamps. Night is drawn too, so a glance at 03:00
+   * still makes sense.
+   */
+  function drawSunArc(sun) {
+    const svg = DORM.el("sun-arc");
+    const W = 720, H = 240;
+    const cx = W / 2, cy = 186, r = 150;
+
+    if (!sun || !sun.sunrise || !sun.sunset) {
+      svg.innerHTML = '<text x="360" y="120" text-anchor="middle" ' +
+        'fill="#45525F" font-family="IBM Plex Mono" font-size="13">NO SOLAR DATA</text>';
+      return;
+    }
+
+    const rise = DORM.parseDate(sun.sunrise).getTime();
+    const set = DORM.parseDate(sun.sunset).getTime();
+    const now = Date.now();
+
+    // 0 at sunrise, 1 at sunset. Outside that range the sun is down.
+    const frac = (now - rise) / (set - rise);
+    const isDay = frac >= 0 && frac <= 1;
+    const clamped = Math.max(0, Math.min(1, frac));
+
+    // Semicircle: sunrise on the left, noon at the top, sunset on the right.
+    const angle = Math.PI * (1 - clamped);
+    const sunX = cx + r * Math.cos(angle);
+    const sunY = cy - r * Math.sin(angle);
+
+    const arcPath = "M " + (cx - r) + " " + cy + " A " + r + " " + r + " 0 0 1 " + (cx + r) + " " + cy;
+
+    // The travelled portion, drawn over the full arc.
+    const travelled = [];
+    const steps = 60;
+    for (let i = 0; i <= steps * clamped; i++) {
+      const a = Math.PI * (1 - i / steps);
+      travelled.push((i === 0 ? "M " : "L ") + (cx + r * Math.cos(a)) + " " + (cy - r * Math.sin(a)));
+    }
+
+    svg.innerHTML =
+      '<defs>' +
+        '<linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">' +
+          '<stop offset="0%" stop-color="#4FD8C4" stop-opacity="0.13"/>' +
+          '<stop offset="100%" stop-color="#4FD8C4" stop-opacity="0"/>' +
+        '</linearGradient>' +
+        '<filter id="sunGlow" x="-70%" y="-70%" width="240%" height="240%">' +
+          '<feGaussianBlur stdDeviation="7" result="b"/>' +
+          '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>' +
+        '</filter>' +
+      '</defs>' +
+
+      // daylight wash under the arc
+      '<path d="' + arcPath + ' L ' + (cx + r) + ' ' + cy + ' L ' + (cx - r) + ' ' + cy + ' Z" ' +
+        'fill="url(#skyGrad)"/>' +
+
+      // horizon
+      '<line x1="' + (cx - r - 26) + '" y1="' + cy + '" x2="' + (cx + r + 26) + '" y2="' + cy + '" ' +
+        'stroke="#263140" stroke-width="1"/>' +
+
+      // full arc, then the part already travelled
+      '<path d="' + arcPath + '" fill="none" stroke="#263140" stroke-width="1.5" ' +
+        'stroke-dasharray="3 4"/>' +
+      (travelled.length > 1
+        ? '<path d="' + travelled.join(" ") + '" fill="none" stroke="#4FD8C4" ' +
+          'stroke-width="2" stroke-linecap="round" opacity="0.75"/>'
+        : "") +
+
+      // endpoints
+      '<circle cx="' + (cx - r) + '" cy="' + cy + '" r="4" fill="#0A0E13" stroke="#4FD8C4" stroke-width="1.5"/>' +
+      '<circle cx="' + (cx + r) + '" cy="' + cy + '" r="4" fill="#0A0E13" stroke="#E8A855" stroke-width="1.5"/>' +
+      '<text x="' + (cx - r) + '" y="' + (cy + 22) + '" text-anchor="middle" ' +
+        'fill="#6B7A8B" font-family="IBM Plex Mono" font-size="11">' +
+        DORM.localClock(sun.sunrise) + "</text>" +
+      '<text x="' + (cx + r) + '" y="' + (cy + 22) + '" text-anchor="middle" ' +
+        'fill="#6B7A8B" font-family="IBM Plex Mono" font-size="11">' +
+        DORM.localClock(sun.sunset) + "</text>" +
+
+      // the sun itself, only while it is above the horizon
+      (isDay
+        ? '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="#E8A855" filter="url(#sunGlow)"/>' +
+          '<circle cx="' + sunX + '" cy="' + sunY + '" r="11" fill="none" stroke="#0A0E13" stroke-width="2"/>'
+        : '<circle cx="' + (cx + r * Math.cos(Math.PI * 1.12)) + '" cy="' + (cy + 20) + '" ' +
+          'r="7" fill="#2A3A4A"/>') +
+
+      '<text x="' + cx + '" y="' + (cy - r - 12) + '" text-anchor="middle" ' +
+        'fill="#45525F" font-family="IBM Plex Mono" font-size="10" letter-spacing="1.5">' +
+        (isDay ? "SUN IS UP" : "BELOW HORIZON") + "</text>";
+  }
+
+
+  function renderSun(sun) {
+    const today = sun.today;
+    DORM.setText("sun-date", today.date);
+
+    if (today.sunrise) {
+      DORM.setText("sun-rise", DORM.localClock(today.sunrise));
+      DORM.setText("sun-rise-utc", DORM.utcClock(today.sunrise) + " UTC");
+    }
+    if (today.solar_noon) {
+      DORM.setText("sun-noon", DORM.localClock(today.solar_noon));
+      DORM.setText("sun-noon-utc", DORM.utcClock(today.solar_noon) + " UTC");
+    }
+    if (today.sunset) {
+      DORM.setText("sun-set", DORM.localClock(today.sunset));
+      DORM.setText("sun-set-utc", DORM.utcClock(today.sunset) + " UTC");
+    }
+
+    if (today.day_length_hours) {
+      const h = Math.floor(today.day_length_hours);
+      const m = Math.round((today.day_length_hours - h) * 60);
+      DORM.setText("sun-length", h + "h " + m + "m");
+    }
+
+    // What happens next, and when.
+    const now = Date.now();
+    const rise = today.sunrise ? DORM.parseDate(today.sunrise).getTime() : null;
+    const set = today.sunset ? DORM.parseDate(today.sunset).getTime() : null;
+
+    let phase = "NIGHT", next = "";
+    if (rise && now < rise) {
+      phase = "BEFORE SUNRISE";
+      next = "Sunrise in " + DORM.duration((rise - now) / 1000);
+    }
+    else if (rise && set && now >= rise && now <= set) {
+      phase = "DAYLIGHT";
+      next = "Sunset in " + DORM.duration((set - now) / 1000);
+    }
+    else if (sun.tomorrow && sun.tomorrow.sunrise) {
+      phase = "AFTER SUNSET";
+      const nextRise = DORM.parseDate(sun.tomorrow.sunrise).getTime();
+      next = "Sunrise in " + DORM.duration((nextRise - now) / 1000);
+    }
+
+    DORM.setText("sun-phase", phase);
+    DORM.setText("sun-next", next);
+
+    drawSunArc(today);
+  }
+
+
+  function renderWeather(latest) {
+    DORM.setText("ov-temp", DORM.fmt(latest.temp_c, 1));
+    DORM.setText("ov-dew", DORM.fmt(latest.dew_point_c, 1) + " °C");
+    DORM.setText("ov-humidity", DORM.fmt(latest.humidity_pct, 0) + " %");
+    DORM.setText("ov-pressure", DORM.fmt(latest.pressure_hpa, 1) + " hPa");
+  }
+
+
+  function renderPower(latest) {
+    DORM.setText("ov-watts", DORM.fmt(latest.total_watts, 2));
+
+    const rails = latest.rails || {};
+    DORM.el("ov-rails").innerHTML = Object.keys(rails).map(key => {
+      const rail = rails[key];
+      return "<div><span>" + rail.label + "</span><b>" +
+        DORM.fmt(rail.watts, 2) + " W</b></div>";
+    }).join("");
+  }
+
+
+  function renderInstrument(index, status) {
+    const totals = index.totals || {};
+    DORM.setText("ov-sweeps", totals.files || 0);
+    DORM.setText("ov-days", totals.days_with_data || 0);
+
+    const dates = index.available_dates || [];
+    DORM.setText("ov-span", dates.length
+      ? dates[0] + " → " + dates[dates.length - 1]
+      : "—");
+
+    const summary = (status.summary || {}).fits;
+    DORM.setText("ov-coverage", summary
+      ? summary.mean_coverage_pct + " %"
+      : "—");
+  }
+
+
+  function renderStreams(status) {
+    const strip = DORM.el("stream-strip");
+
+    strip.innerHTML = (status.streams || []).map(stream => {
+      const label = STREAM_LABEL[stream.stream] || stream.stream;
+      const text = STATE_TEXT[stream.state] || stream.state;
+      return '<div class="stream-cell is-' + stream.state + '">' +
+        '<div class="stream-name">' + label + "</div>" +
+        '<div class="stream-state">' + text + "</div>" +
+        '<div class="stream-sub">' +
+          (stream.last_seen
+            ? "last data " + DORM.duration(stream.age_seconds) + " ago"
+            : "never seen") +
+        "</div></div>";
+    }).join("");
+
+    const overall = STATE_TEXT[status.overall] || status.overall;
+    DORM.setText("connection-status", "STATION: " + overall);
+
+    const dot = DORM.el("status-dot");
+    if (dot) {
+      dot.style.background = status.overall === "up"
+        ? "var(--signal)"
+        : (status.overall === "late" ? "var(--warn)" : "#E85D5D");
+    }
+  }
+
+
+  function ageTag(stream) {
+    if (!stream || !stream.last_seen) return "NO DATA";
+    return DORM.duration(stream.age_seconds).toUpperCase() + " AGO";
+  }
+
+
+  async function refreshAll() {
+    DORM.clearError();
+    try {
+      const [sun, weather, power, status, index] = await Promise.all([
+        DORM.getJSON(SUN_URL),
+        DORM.getJSON(WEATHER_URL),
+        DORM.getJSON(POWER_URL),
+        DORM.getJSON(STATUS_URL),
+        DORM.getJSON(FITS_URL)
+      ]);
+
+      renderSun(sun);
+      renderWeather(weather);
+      renderPower(power);
+      renderInstrument(index, status);
+      renderStreams(status);
+
+      const byName = {};
+      (status.streams || []).forEach(s => { byName[s.stream] = s; });
+      DORM.setText("weather-age", ageTag(byName.weather));
+      DORM.setText("power-age", ageTag(byName.power));
+      DORM.setText("fits-age", ageTag(byName.fits));
+
+      if (weather.timestamp) {
+        DORM.setText("overview-updated", "LATEST DATA " + DORM.utcStamp(weather.timestamp));
+        DORM.setText("overview-local", "LOCAL " + DORM.localStamp(weather.timestamp));
+      }
+
+      console.log("[DORM] overview ready");
+    }
+    catch (e) {
+      console.error("[DORM] overview failed", e);
+      DORM.showError(e.message);
+    }
+  }
+
+
+  DORM.renderNav("index.html");
+  refreshAll();
+
+  /* The sun arc moves with the wall clock even when no new data arrives,
+   * so it alone is redrawn on a timer. */
+  setInterval(() => {
+    DORM.getJSON(SUN_URL).then(renderSun).catch(() => {});
+  }, 60000);
+
+  /* When the station is live, switch the whole page to polling:
+   *     setInterval(refreshAll, 60000);
+   * Power should poll faster than that (rails change in seconds), which
+   * is why the power page owns its own interval rather than inheriting
+   * one from here. */
+  </script>
+
+</body>
+
+</html>

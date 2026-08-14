@@ -97,7 +97,7 @@ def main():
     ap.add_argument("--search-back", type=int, default=420, help="max calendar days to search")
     ap.add_argument(
         "--store",
-        default=os.path.join(os.path.dirname(__file__), "..", "data", "fits"),
+        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "fits"),
     )
     ap.add_argument("--date", action="append", help="fetch a specific YYYY-MM-DD (repeatable)")
     args = ap.parse_args()
