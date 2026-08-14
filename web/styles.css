@@ -1920,3 +1920,30 @@ button:disabled,
     font-size: 10px;
   }
 }
+
+/* Formal title as it is properly written, with a plain-English gloss
+   underneath -- the site is in English but a degree title is a name. */
+.person-cred {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+
+  color: var(--signal);
+
+  margin-top: -4px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.person-cred span {
+  display: block;
+  margin-top: 3px;
+
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+
+  color: var(--text-faint);
+}
