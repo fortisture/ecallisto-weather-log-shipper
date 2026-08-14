@@ -243,24 +243,6 @@
 
 
 
-    <!-- ================= STATION LOG ================= -->
-
-    <section class="panel" style="margin-top:18px;">
-      <div class="panel-head">
-        <span class="label">Station Log</span>
-        <span class="tag" id="blog-tag">—</span>
-      </div>
-
-      <div class="blog-body">
-        <div class="blog-filter" id="blog-filter">
-          <button type="button" class="range-btn is-active" data-kind="all">ALL</button>
-          <button type="button" class="range-btn" data-kind="station">INSTRUMENT</button>
-          <button type="button" class="range-btn" data-kind="site">SOFTWARE</button>
-        </div>
-
-        <ol class="blog-list" id="blog-list"></ol>
-      </div>
-    </section>
 
     <!-- ================= CONTACT ================= -->
 
@@ -399,100 +381,9 @@
   }
 
 
-  /* ---------------- station log ----------------
-   * Two feeds in one list: entries about the instrument (quoted from the
-   * e-Callisto network journal) and entries about this software (parsed
-   * straight out of CHANGELOG.md, so a release note appears here the
-   * moment it is committed rather than being retyped).
-   */
-  const BLOG_URL = "./api/blog.json";
-
-  let blogPosts = [];
-  let blogFilter = "all";
-
-
-  function renderBlog() {
-    const list = DORM.el("blog-list");
-    const shown = blogPosts.filter(p => blogFilter === "all" || p.kind === blogFilter);
-
-    if (!shown.length) {
-      list.innerHTML = '<li class="blog-empty">No entries.</li>';
-      return;
-    }
-
-    list.innerHTML = shown.map(post => {
-      const points = (post.points || []).length
-        ? "<ul>" + post.points.map(pt => "<li>" + escapeHtml(pt) + "</li>").join("") + "</ul>"
-        : "";
-
-      const quote = post.quote
-        ? '<blockquote>' + escapeHtml(post.quote) +
-          (post.source
-            ? '<cite>' +
-                (post.source_url
-                  ? '<a href="' + post.source_url + '" rel="noopener noreferrer" target="_blank">' +
-                    escapeHtml(post.source) + "</a>"
-                  : escapeHtml(post.source)) +
-              "</cite>"
-            : "") +
-          "</blockquote>"
-        : "";
-
-      return '<li class="blog-post is-' + (post.kind || "site") + '">' +
-        '<div class="bp-meta">' +
-          '<time>' + post.date + "</time>" +
-          '<span class="bp-kind">' +
-            (post.kind === "station" ? "INSTRUMENT" : "SOFTWARE") +
-          "</span>" +
-        "</div>" +
-        '<div class="bp-body">' +
-          "<h4>" + escapeHtml(post.title || "") + "</h4>" +
-          (post.body ? "<p>" + escapeHtml(post.body) + "</p>" : "") +
-          points + quote +
-        "</div>" +
-      "</li>";
-    }).join("");
-  }
-
-
-  function escapeHtml(text) {
-    return String(text)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-
-
-  async function loadBlog() {
-    try {
-      const feed = await DORM.getJSON(BLOG_URL);
-      blogPosts = feed.posts || [];
-      DORM.setText("blog-tag", blogPosts.length + " ENTRIES");
-      renderBlog();
-    }
-    catch (e) {
-      console.warn("[DORM] station log unavailable", e.message);
-      DORM.setText("blog-tag", "UNAVAILABLE");
-      DORM.el("blog-list").innerHTML =
-        '<li class="blog-empty">Station log needs the server running.</li>';
-    }
-  }
-
-
-  DORM.el("blog-filter").querySelectorAll(".range-btn").forEach(button => {
-    button.addEventListener("click", () => {
-      DORM.el("blog-filter").querySelectorAll(".range-btn")
-        .forEach(b => b.classList.remove("is-active"));
-      button.classList.add("is-active");
-      blogFilter = button.dataset.kind;
-      renderBlog();
-    });
-  });
-
-
   DORM.renderNav("about.html");
   loadCounters();
   loadGallery();
-  loadBlog();
   </script>
 
 </body>

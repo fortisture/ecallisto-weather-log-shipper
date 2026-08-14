@@ -5,6 +5,33 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.1.0] - 2026-08-14
+
+### Added
+- **Station Log is its own page** (`blog.html`), sitting left of About in
+  the nav rather than buried at the bottom of the About page.
+- `docs/DESIGN-BASELINE.md` records the current appearance and the exact
+  one-line command to restore it, tagged `design-v4-baseline`.
+
+### Fixed — accessibility pass
+Audited against the `ui-ux-pro-max` checklist. Four measured defects, all
+fixed without changing the visual design:
+- **Contrast.** `--text-faint` measured 2.12:1 against the panel surface —
+  below even the 3:1 non-text minimum — and `--text-dim`, which carries
+  body copy, measured 3.87:1 against a 4.5:1 requirement. Both lightened
+  to exactly clear their threshold, keeping hue and saturation, so the
+  palette looks the same and now passes.
+- **Keyboard focus.** The focus ring computed to `outline-style: none` on
+  buttons. Rebuilt on `:focus-visible` for every interactive element, with
+  a backup box-shadow and a `forced-colors` variant.
+- **Touch targets.** Controls were 28px tall against a 44px minimum. Under
+  `@media (pointer: coarse)` they now grow to 44px; the dense desktop
+  layout is untouched.
+- **Horizontal scroll on mobile.** The seven-item nav was 560px wide at a
+  375px viewport, forcing the whole page to scroll sideways. It now wraps.
+- Reduced-motion coverage extended from the status dot to all animation
+  and transitions.
+
 ## [4.0.0] - 2026-08-14
 
 ### Changed

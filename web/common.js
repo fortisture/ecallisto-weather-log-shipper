@@ -47,6 +47,7 @@ const DORM = (function () {
     { href: "./status.html", label: "Status" },
     { href: "./sun.html", label: "Sun" },
     { href: "./fits.html", label: "Spectrograms" },
+    { href: "./blog.html", label: "Log", side: "right" },
     { href: "./about.html", label: "About", side: "right" }
   ];
 

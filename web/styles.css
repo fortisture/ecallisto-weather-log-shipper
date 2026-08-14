@@ -1,12 +1,18 @@
 :root {
+  /* Greys were measured against the panel surfaces with a contrast
+   * checker, not chosen by eye. --text-dim carries body copy so it clears
+   * 4.5:1; --text-faint is captions and axis ticks so it clears the 3:1
+   * non-text minimum. The earlier values were 3.87:1 and 2.12:1, i.e.
+   * both failing, which is invisible on a good monitor in a dark room and
+   * very visible on a laptop outdoors. */
   --bg: #0A0E13;
   --panel: #111820;
   --panel-raised: #151D27;
   --line: #263140;
   --line-faint: #1A2229;
   --text: #DCE4EC;
-  --text-dim: #6B7A8B;
-  --text-faint: #45525F;
+  --text-dim: #778596;
+  --text-faint: #58697A;
   --signal: #4FD8C4;
   --signal-dim: #2A6D63;
   --warn: #E8A855;
@@ -1105,11 +1111,78 @@ footer.page-footer {
 
 /* ---------- Focus visibility ---------- */
 
+/* Keyboard focus. :focus-visible only, so a mouse click doesn't leave a
+ * ring behind, but tabbing always shows exactly where you are. The
+ * offset keeps the ring clear of the element's own border. */
 a:focus-visible,
-button:focus-visible {
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid var(--signal);
-
   outline-offset: 2px;
+
+  /* Some browsers drop the outline on elements with their own background;
+   * the shadow guarantees the ring is drawn either way. */
+  box-shadow: 0 0 0 4px rgba(79, 216, 196, 0.25);
+}
+
+/* Windows high-contrast mode replaces colours wholesale -- keep a ring
+ * that survives it. */
+@media (forced-colors: active) {
+  a:focus-visible,
+  button:focus-visible,
+  select:focus-visible {
+    outline: 2px solid CanvasText;
+  }
+}
+
+/* Anything clickable should say so. */
+button,
+select,
+.range-btn,
+.day-btn,
+.period-btn,
+.sweep-btn {
+  cursor: pointer;
+}
+
+button:disabled,
+.day-btn:disabled,
+.period-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* Touch targets. The dense desktop layout is deliberate, but a finger is
+ * not a cursor: on touch pointers every control grows to the 44px
+ * minimum. Desktop spacing is untouched. */
+@media (pointer: coarse) {
+  .range-btn,
+  .period-btn,
+  .day-btn,
+  .sweep-btn,
+  .site-nav a,
+  select {
+    min-height: 44px;
+  }
+
+  .range-btn,
+  .sweep-btn {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
+
+/* Motion is decoration here, never information -- so it can all go. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 /* ==================================================================
    Overview page
@@ -1787,5 +1860,26 @@ button:focus-visible {
 
 @media (max-width: 700px) {
   .blog-post { grid-template-columns: 1fr; gap: 8px; }
-  .site-nav { flex-wrap: wrap; gap: 8px; }
+}
+
+/* The nav is seven items wide -- at 375px that is 560px of tabs, which
+ * pushed the whole page into horizontal scroll. Wrapping keeps every
+ * destination reachable without a scrollbar; the About/Log pair stays
+ * grouped because they wrap as their own row. */
+@media (max-width: 780px) {
+  .site-nav {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .nav-main,
+  .nav-aside {
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  .site-nav a {
+    padding: 8px 12px;
+    font-size: 10px;
+  }
 }
