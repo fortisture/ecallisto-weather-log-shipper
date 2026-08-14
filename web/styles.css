@@ -1947,3 +1947,38 @@ button:disabled,
 
   color: var(--text-faint);
 }
+
+/* ---- contact page ---- */
+
+.contact-intro {
+  padding: 18px 24px 4px;
+  max-width: 66ch;
+}
+
+.contact-intro p {
+  margin: 0 0 14px;
+
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-dim);
+}
+
+/* A third line under each value: what the value is for. Without it the
+   grid is a wall of unlabelled links. */
+.ci-note {
+  margin-top: 5px;
+
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+
+  color: var(--text-faint);
+}
+
+/* Values still awaiting real details read as placeholders rather than
+   as content, so nobody mistakes them for an address. */
+.ci-value[data-editable] {
+  color: var(--text-faint);
+  font-style: italic;
+}

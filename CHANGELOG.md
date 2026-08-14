@@ -5,6 +5,21 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.5.0] - 2026-08-14
+
+### Fixed
+- **Contact page had unstyled markup.** `.contact-intro` and `.ci-note`
+  were written into the page without any matching CSS, so the explanatory
+  text and the per-item notes rendered as unformatted default text.
+- Placeholder values still awaiting real details now render as visibly
+  placeholder (italic, muted) rather than looking like content.
+
+### Changed
+- **Reloading any page returns to the Overview.** Deliberately narrow: only
+  a genuine reload triggers it, detected through the Navigation Timing API.
+  Following a link, using back/forward, or opening a page fresh all behave
+  normally — otherwise the other seven pages would be unreachable.
+
 ## [4.4.0] - 2026-08-14
 
 ### Changed

@@ -65,6 +65,35 @@ const DORM = (function () {
     if (node) node.textContent = value;
   }
 
+
+  /* ---------------------------------------------------------------
+   * Reload returns to the Overview.
+   *
+   * Requested behaviour: refreshing should put you back on the station
+   * overview rather than leaving you where you were. Note this is the
+   * opposite of what a browser normally does -- a reload usually means
+   * "give me this page again" -- so it is deliberately narrow: only a
+   * genuine reload triggers it. Following a link, using back/forward, or
+   * opening a page fresh all behave normally, otherwise the other seven
+   * pages would be unreachable.
+   * --------------------------------------------------------------- */
+  function overviewOnReload(currentFile) {
+    if (currentFile === "index.html") return;
+
+    let navType = "";
+    try {
+      const entry = performance.getEntriesByType("navigation")[0];
+      navType = entry ? entry.type : "";
+    }
+    catch (e) {
+      return;   // API unavailable: leave the page where it is
+    }
+
+    if (navType === "reload") {
+      location.replace("./index.html");
+    }
+  }
+
   function renderNav(currentFile) {
     const nav = document.querySelector(".site-nav");
     if (!nav) return;
@@ -79,6 +108,8 @@ const DORM = (function () {
         (isCurrent ? ' aria-current="page"' : "") +
         ">" + item.label + "</a>";
     };
+
+    overviewOnReload(currentFile);
 
     nav.innerHTML =
       '<span class="nav-main">' +
