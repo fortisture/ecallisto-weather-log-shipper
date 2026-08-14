@@ -298,3 +298,116 @@ sudo systemctl restart dorm-tunnel dorm-sender   # Pi
 The **Status** page is the fastest check that it is all working: if the
 instrument stream shows anything other than ONLINE, data has stopped
 arriving regardless of what the services claim.
+
+---
+
+## Co-hosting additional services
+
+The station server is designed to share a host with other services — a
+second website, a database, an application backend. The objective when
+adding them is isolation: a compromise of an added service must not extend
+to the station's data, its credentials, or another service. The following
+controls establish that isolation.
+
+### 1. One system account per service
+
+Run each service under its own dedicated, unprivileged user. Filesystem
+permissions then prevent one service from reading another's files. No
+service runs as root.
+
+```
+dorm-station   -> owns data/ and secrets/, runs station/server.py
+newsite        -> owns its own document root and data
+dbservice      -> owns the database data directory
+```
+
+### 2. Bind every service to the loopback interface
+
+The station server already binds the receiver and the web server to
+`127.0.0.1`. Apply the same to every added service and to the database.
+Only the reverse proxy and `sshd` listen on a public interface.
+
+```
+# PostgreSQL: postgresql.conf
+listen_addresses = 'localhost'
+
+# MySQL / MariaDB: my.cnf
+bind-address = 127.0.0.1
+```
+
+This is the single most important database setting. A database reachable
+only over the loopback interface cannot be attacked from the network,
+regardless of any other misconfiguration.
+
+### 3. One least-privilege database role per application
+
+No application connects as the database superuser. Each application has a
+role that owns only its own schema and holds only the privileges it
+requires — typically `SELECT`, `INSERT`, `UPDATE`, `DELETE` on its own
+tables, and nothing else.
+
+```sql
+CREATE ROLE newsite LOGIN PASSWORD '...';
+CREATE DATABASE newsite OWNER newsite;
+-- newsite cannot create roles, cannot read other databases, is not superuser
+```
+
+A SQL-injection flaw in one application is then confined to that
+application's own data.
+
+### 4. Parameterised queries only
+
+Every SQL statement issued by an added application uses parameterised
+queries or prepared statements. Interpolating values into SQL strings is
+the direct cause of SQL injection and is not used.
+
+### 5. Per-service systemd sandboxing
+
+Give each service a unit file with the same hardening the station unit
+uses, scoped to that service's own paths:
+
+```ini
+[Service]
+User=newsite
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/newsite     # its own data only
+```
+
+`ProtectSystem=strict` makes the entire filesystem read-only except the
+explicit `ReadWritePaths`; `NoNewPrivileges=true` blocks privilege
+escalation; `PrivateTmp=true` gives the service a private `/tmp`,
+eliminating a common cross-service attack vector.
+
+### 6. One reverse proxy for all services
+
+Terminate TLS once, at the reverse proxy, and route by hostname to each
+service on its own loopback port:
+
+```
+station.example.org -> 127.0.0.1:8090   (dorm-station)
+newsite.example.org -> 127.0.0.1:8100   (newsite)
+```
+
+The proxy is also the correct place for rate limiting (see below) and, if
+required, request buffering that absorbs slow-client attacks before they
+reach any application.
+
+### Result
+
+Under these controls, a full compromise of an added service yields the
+attacker that service alone: not the station archive, not another
+service's database, not a shell, not the host. Isolation is produced by
+separate accounts, loopback-only databases, least-privilege database
+roles, and per-service sandboxing acting together.
+
+### Rate limiting the public archive
+
+The observation archive is served without authentication, by design —
+e-Callisto data is public. The exposure is bandwidth: a client can request
+files in a loop. If the local archive grows large, apply a rate limit at
+the reverse proxy. Both Caddy and Cloudflare provide this in a single
+directive; the appropriate threshold depends on the host's available
+bandwidth.

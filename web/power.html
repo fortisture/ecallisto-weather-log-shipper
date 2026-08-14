@@ -318,10 +318,15 @@
             titleFont: { family: "IBM Plex Mono", size: 10 },
             bodyFont: { family: "IBM Plex Mono", size: 12 },
             callbacks: {
-              label: item => item.parsed.y === null
-                ? "no data"
-                : (item.dataset.label || "") + "  " +
-                  item.parsed.y.toFixed(decimals) + " " + unit
+              label: item => {
+                if (item.parsed.y === null) return "no data";
+                // The reference line's label already carries its value
+                // (e.g. "Median 66 mA"), so appending the value again
+                // would show it twice. Reference lines are dashed.
+                if (item.dataset.borderDash) return item.dataset.label;
+                return (item.dataset.label || "") + "  " +
+                  item.parsed.y.toFixed(decimals) + " " + unit;
+              }
             }
           }
         },

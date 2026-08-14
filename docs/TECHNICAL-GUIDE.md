@@ -2,11 +2,11 @@
 
 **Višnjan Observatory · e-Callisto solar radio spectrometer**
 
-A complete description of the data pipeline: what each component does, how
-the pieces fit together, and the reasoning behind the design decisions.
+This document describes the data pipeline: the function of each component,
+their interaction, and the rationale for the principal design decisions.
 
-Written to be readable without prior knowledge of the codebase. Familiarity
-with files and networking is assumed; nothing beyond that.
+It assumes familiarity with files and networking and no prior knowledge of
+the codebase.
 
 | | |
 |---|---|
@@ -89,9 +89,9 @@ within seconds of being written, not batched daily or on demand.
 
 ## 3. System overview
 
-The Raspberry Pi sits at the telescope. The server is somewhere else
-entirely — a different building, a different network, a different city if
-you like. They are connected by nothing more than SSH.
+The Raspberry Pi is co-located with the telescope. The server is on a
+separate host — a different building, network, or city. The two are
+connected only by SSH.
 
 ```
    RASPBERRY PI (at the telescope)          UBUNTU SERVER (elsewhere)
@@ -148,12 +148,12 @@ Five principles govern the design:
 
 ## 3b. How the data actually crosses, over SSH
 
-This is the part that surprises people, so it is worth going slowly.
+The mechanism is described in full below.
 
 **No data port is open on the server.** Port 9443, where the receiver
-listens, is bound to the server's own loopback address — the network
-equivalent of a room with no external door. Yet the Pi, on a completely
-different network, delivers into it.
+listens, is bound to the server's loopback interface and has no externally
+reachable listener. The Pi, on a separate network, nonetheless delivers
+into it.
 
 ### The one command that does it
 
@@ -163,7 +163,7 @@ On the Pi, a service runs this and nothing else:
 ssh -N -L 19443:127.0.0.1:9443 dorm@server.example.org
 ```
 
-Read `-L 19443:127.0.0.1:9443` as three separate things:
+The argument `-L 19443:127.0.0.1:9443` has three fields:
 
 | Part | Meaning |
 |---|---|
@@ -171,21 +171,20 @@ Read `-L 19443:127.0.0.1:9443` as three separate things:
 | `127.0.0.1` | Anything arriving there should be delivered to this address… |
 | `9443` | …on this port — **as resolved from the server's point of view** |
 
-That middle field is the whole trick. `127.0.0.1` is not evaluated on the
+The middle field is the operative element. `127.0.0.1` is not evaluated on the
 Pi. It is sent across and evaluated *on the server*, where it means the
-server's own loopback. The Pi has effectively borrowed a door into a room
-that has no outside entrance.
+server's own loopback interface. The Pi thereby reaches a port that has no
+externally reachable listener.
 
 `-N` means "do not run a command" — this SSH session exists purely to carry
 the forward, and never gets a shell.
 
 ### Following one row of weather data
 
-Suppose the weather logger appends a line. Every step it takes:
+When the weather logger appends a line, the following steps occur:
 
 1. **`sender.py` opens an ordinary TCP connection to `127.0.0.1:19443`.**
-   As far as the program is concerned, the receiver is running on the same
-   machine. It has no idea a network is involved. This is why the sender
+   From the program's perspective the receiver is on the same host; no network is visible to it. This is why the sender
    contains no code about tunnels at all — the complexity lives entirely in
    the SSH configuration, not in the application.
 
@@ -238,7 +237,7 @@ paranoid, because the two layers answer different questions:
 | **SSH** | *Which machine is this?* — proven by the Pi's private key |
 | **TLS + pinning + token** | *Which program is this, and am I talking to the right receiver?* |
 
-Consider what the inner layer protects against. Suppose someone changes the
+The inner layer protects against the following case. Suppose someone changes the
 tunnel to point at a machine of their own. SSH would be perfectly content —
 it authenticated correctly, to the wrong destination. The sender then
 compares that machine's certificate against the pinned fingerprint, finds it
@@ -260,8 +259,7 @@ command="",no-agent-forwarding,no-pty,permitopen="127.0.0.1:9443" ssh-ed25519 AA
 - `permitopen="127.0.0.1:9443"` — this key may open **that one forward** and
   nothing else
 
-If the Pi is stolen off the hillside, whoever takes it holds a key that can
-deliver weather data into one port. Not a shell, not the archive, not the
+If the device is physically compromised, the key it holds can open only that single forward and deliver weather data into one port. Not a shell, not the archive, not the
 rest of the network.
 
 ### When the link drops
@@ -363,7 +361,7 @@ not at the end of a batch.
 
 This matters because: suppose the network drops halfway through sending 50
 rows. If the record were only written at the end, the sender would restart
-and re-send all 50, and you'd get duplicates. If it were written at the
+and re-send all 50, producing duplicates. If it were written at the
 start, the interrupted rows would be skipped forever. Writing after each
 row means the worst case is re-sending the single row that was in flight.
 
@@ -460,7 +458,7 @@ def date_subdir(name):
 
 A file whose name carries **no** date goes into an `undated/` folder
 rather than being guessed at. Filing real measurements under a day they
-didn't come from would be worse than admitting we don't know.
+did not originate would be an error; the unknown case is represented explicitly.
 
 Because appends are matched by filename, a daily-rotated log keeps landing
 in the same dated folder for its whole day, then naturally moves to the
@@ -509,7 +507,7 @@ file, then renames it into place — so the website can never catch a file
 half-written and read garbage.
 
 On Windows that rename can occasionally fail because something else has the
-file open (antivirus, search indexing, or you looking at it in an editor).
+file open (antivirus, search indexing, or an editor).
 When that happens the receiver retries five times over about a second. This
 is not theoretical — it happened during testing, because the file was open
 in an editor at the time.
@@ -518,17 +516,17 @@ in an editor at the time.
 
 ## 6. Security model
 
-The data crosses your local network. Three independent protections, each
+The data crosses the local network. Three independent protections, each
 covering a different failure:
 
 ### 1. TLS encryption — nobody can read it
 
-The same technology as the padlock in your browser. Anyone capturing the
+The same mechanism as HTTPS in a browser. Any party capturing the
 traffic sees scrambled bytes.
 
 ### 2. Certificate pinning — the Pi can't be tricked
 
-Encryption alone doesn't prove *who* you're talking to. Normally your
+Encryption alone does not establish the identity of the peer. A
 browser checks a certificate against a list of trusted authorities. On a
 private network there's no such authority, so this project does something
 stricter and simpler.
@@ -556,9 +554,9 @@ Note this happens *before* the token is sent — so a fake server never even
 gets to see the shared secret.
 
 This defeats an attacker who redirects traffic to their own machine: they
-can present a valid-looking certificate, but not *your* certificate.
+can present a syntactically valid certificate, but not the pinned one.
 
-### 3. A shared secret token — only your Pi can connect
+### 3. A shared-secret token — restricts connection to the authorised Pi
 
 A long random password, generated once, known to both sides. Every
 connection must present it before sending data. Wrong token → `DENY` and
@@ -567,7 +565,7 @@ disconnect.
 The comparison uses `hmac.compare_digest` rather than `==`. A normal string
 comparison stops at the first wrong character, so a wrong guess starting
 with the right letter takes microscopically longer to reject. Measure
-enough attempts and you can extract the token one character at a time. This
+with enough attempts the token can be extracted one character at a time. This
 is a **timing attack**, and `compare_digest` defeats it by always taking
 the same amount of time.
 
@@ -582,13 +580,56 @@ if not hmac.compare_digest(token, cfg["token"]):   # NOT  token == cfg["token"]
 
 ### What it deliberately does not do
 
-No internet exposure. No port forwarding. No cloud. The firewall rule is
-scoped to the local network only. The system is unreachable from outside
-your house.
+No data port is exposed to the network and no port forwarding is required.
+Ingest reaches the receiver only through the SSH tunnel (section 3b); the
+receiver binds to the loopback interface and is not reachable from any
+other host directly.
 
 **The secrets never go in the git repository.** `.gitignore` excludes
 `*.pem`, `token.txt`, `fingerprint.txt`, and `config.json`. The published
-code is useless to anyone without your keys.
+code is useless without the corresponding private keys.
+
+### Availability: bounded resources
+
+The three mechanisms above protect confidentiality and integrity. A
+separate class of protection concerns availability — preventing a client
+from exhausting the server's resources.
+
+Both listeners impose limits. The receiver (`station/receiver.py`) applies
+a timeout to the raw socket before the TLS handshake, so a client that
+connects and then sends nothing is dropped rather than holding a thread
+indefinitely; a longer idle timeout applies after authentication, since a
+legitimate sender may pause between rows. It also caps concurrent
+connections both globally and per source address. A legitimate deployment
+has one sender, so the per-source cap is small.
+
+The HTTP server (`station/server.py`) applies an equivalent set: a
+request-read timeout that drops a client which dribbles a partial request
+("slowloris"), a global worker cap that bounds memory, and a per-source
+cap. The per-source cap is the decisive control: a single host can occupy
+only a few worker slots regardless of how many connections it opens, so it
+cannot deny service to other clients.
+
+These bounds contain a single-host attacker. A distributed attack from
+many source addresses is outside the scope of a single process and is the
+responsibility of the reverse proxy and the network. Both limits are
+verified by `tools/stress_test.py` and by the penetration testing recorded
+during development.
+
+### Extending the host: databases and additional sites
+
+Co-hosting a second web application and a database on the server changes
+the threat model, because a compromise of the added code must not reach
+the station's data or credentials. The controls that preserve separation
+are: a distinct unprivileged system account per service; a database bound
+to the loopback interface only; one least-privilege database role per
+application; parameterised queries exclusively; per-service systemd
+sandboxing (`ProtectSystem=strict`, `NoNewPrivileges=true`, `PrivateTmp`,
+and an explicit `ReadWritePaths` scoped to that service's own data); and a
+single reverse proxy in front of all services, with each service bound to
+its own loopback port. Under these controls a full compromise of one
+service yields the attacker only that service. Detailed guidance is in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
@@ -612,8 +653,8 @@ files hundreds of times an hour for no reason.
 
 The watcher is wrapped in a catch-all error handler. If something
 unexpected breaks in it, it logs the error and keeps going, rather than
-silently dying and leaving you with a website that quietly stops updating —
-the worst kind of failure, because everything *looks* fine. It also throws
+terminating silently and leaving a web interface that stops updating —
+a failure mode in which the system appears to operate normally. It also throws
 away its cached fingerprints so the next pass rebuilds from scratch:
 
 ```python
@@ -673,7 +714,7 @@ def resync_all(cfg, state):
     log("failsafe resync: delivery state cleared, resending everything")
 ```
 
-That sounds drastic, but it is safe *by construction*: rows are matched by
+This is safe by construction: rows are matched by
 content hash and offset, and blobs replace whole files — so re-sending
 something that already arrived changes nothing. This is what fixes the
 backlog if the server was rebuilt, restored from a backup, or lost files.
@@ -719,7 +760,7 @@ agrees on what that means.
 Dew point isn't recorded by the station; it's calculated from temperature
 and humidity using the **Magnus formula**, the standard meteorological
 approximation. It's the temperature at which air becomes saturated — a
-better comfort indicator than humidity alone, and it tells you when dew or
+better indicator than humidity alone, and it identifies the onset of dew or
 fog will form on the equipment.
 
 If either input is missing, or humidity is outside a physically sensible
@@ -823,7 +864,7 @@ dropping it would misreport the station's present state.
 
 ### Both UTC and local time
 
-Everything is shown twice: UTC (what science uses, unambiguous) and your
+Every time is shown twice: UTC (unambiguous, used in the observations) and the
 local time with the zone name (CEST), so "07:50" is never ambiguous. Plus
 "UPDATED 11S AGO", ticking every second — so a frozen page is obvious.
 Without it, a dashboard that stopped updating looks exactly like a
@@ -894,9 +935,8 @@ question, and they deliberately do not overlap.
 
 Opens with the sun drawn as an arc from sunrise to sunset, with a marker
 where the sun currently is. That is a picture rather than three
-timestamps because "where are we in the day" is read far faster from a
-shape, and because at 03:00 a row of numbers tells you nothing while an
-empty arc tells you immediately that it is night.
+timestamps because position within the day is read far faster from a
+shape; at 03:00 a set of numeric times is uninformative whereas an empty arc immediately indicates night.
 
 Below it: the latest weather, the latest power draw, the instrument's
 totals, and a strip showing whether each data stream is delivering.
@@ -991,18 +1031,18 @@ def rail_watts(reading, key):
 ```
 
 If watts were logged as a third column, it could drift out of agreement
-with the two numbers it's supposed to come from — and then you'd have no
+with the two values it derives from, in which case there would be no
 way to know which one to believe. Deriving it makes that impossible.
 
 Same reason `None` is returned rather than 0 when a measurement is
 missing: zero watts is a *claim* ("nothing is drawing power"), which is a
-very different statement from "we didn't measure it."
+distinct from the absence of a measurement.
 
 ### Why four separate current charts
 
 The heater peaks near 1800 mA; the BME sensor draws about 3 mA. That's a
 600:1 ratio. On one shared axis the BME, LNA and CALLISTO traces would all
-be flattened into the baseline and you'd effectively have a heater chart
+would be flattened into the baseline, reducing the display to a heater chart
 with three invisible lines on it.
 
 So each rail gets its own small chart with its own scale. The BME chart
@@ -1064,7 +1104,7 @@ instrument.
 
 The instrument sweeps across radio frequencies (45–404 MHz here), measuring
 signal strength, four times a second. Stack those sweeps side by side and
-you get an image: **time across, frequency up, brightness = signal
+the result is an image: **time across, frequency up, brightness = signal
 strength**. Solar flares appear as bright streaks.
 
 Each file covers 15 minutes: 3600 time samples × 200 frequency channels.
@@ -1086,12 +1126,12 @@ self-describing.
 ### Background subtraction — why the image would otherwise be useless
 
 Each frequency channel has its own baseline: different antenna gain,
-different local interference. Raw, the image is horizontal stripes and you
-cannot see anything real.
+different local interference. Without correction the image is dominated by horizontal stripes and the
+signal is not discernible.
 
 The published e-Callisto method is to subtract **a constant background per
 frequency channel, computed as the mean over time**, then clip. That is the
-default here, so what you see matches the standard product. Four modes are
+default, so the output matches the standard product. Four modes are
 offered:
 
 ```javascript
@@ -1124,7 +1164,7 @@ function computeBaseline(data, width, height, mode) {
   and so partially erases itself; a median ignores it. Better on a busy
   file, but not the standard.
 - **global** — one number for the whole image. Preserves the real
-  differences *between* channels, so you can see which parts of the band
+  differences *between* channels, making it possible to identify which parts of the band
   are noisy. Useless for spotting faint bursts.
 - **none** — raw receiver digits, stripes and all.
 
@@ -1141,7 +1181,7 @@ everything instead).
 
 ### The axes — what makes it a plot rather than a picture
 
-A coloured rectangle tells you nothing without labels. The canvas therefore
+A coloured rectangle conveys nothing without axes and labels. The canvas therefore
 reserves margins around the image and draws the chrome into them:
 
 ```javascript
@@ -1191,7 +1231,7 @@ It is worth knowing that this palette is *not* monotonic in brightness —
 mid-range greens can read as "brighter" than stronger signals further up
 the scale. The other three (**Inferno**, **Viridis**, **Grayscale**) are
 perceptually ordered: brightness rises consistently with signal, so a
-brighter pixel always means a stronger signal. If you are judging relative
+brighter pixel always corresponds to a stronger signal. For judgement of relative
 intensity rather than pattern-matching against published plots, use one of
 those.
 
@@ -1202,10 +1242,9 @@ sampled from the official renderer.
 ### Browsing years
 
 The archive spans years, so a flat list of days would be thousands of
-buttons — and "09-07" alone doesn't tell you which year. Navigation is
+buttons, and "09-07" alone does not identify the year. Navigation is
 therefore **year → month → day**, and each level shows how many recording
-days it contains, so empty stretches are visible before you click into
-them.
+days it contains, so empty intervals are visible without navigating into them.
 
 ### The frequency axis — a real correctness trap
 
@@ -1216,7 +1255,7 @@ axis "may not be regular."
 
 The real frequency list is stored separately, in a table after the image
 data. The viewer reads that table and shows the true range — and labels
-which source it used, so you always know whether you're seeing measured
+which source was used, so it is always evident whether the values are measured
 values or a header approximation.
 
 Had I trusted the header, the page would have displayed a confident,
@@ -1226,8 +1265,7 @@ official-looking, completely wrong frequency range.
 
 The day selector shows every day in the archive's span, with days that have
 no data shown greyed out and labelled "no data — station not recording."
-Absence of data is itself information: it tells you the instrument was
-down, which is something you want to see rather than have hidden.
+Absence of data is itself information: it indicates the instrument was not recording, which is reported rather than concealed.
 
 ---
 
@@ -1309,7 +1347,7 @@ python tools/fetch_visnjan_fits.py --days 3
 | Explicit gap markers | Otherwise the chart invents data that never existed |
 | Chart.js stored locally | An observatory may not have reliable internet |
 | Colour palette validated with a tool | Colour-blind safety is measurable, so it was measured |
-| Median for background subtraction | An average would be dragged up by the very bursts you want to see |
+| Median for background subtraction | A mean would be biased upward by the bursts of interest |
 | Percentile contrast scaling | One interference spike would otherwise flatten the whole image |
 | Read frequencies from the table, not the header | The header value is wrong by a factor of two |
 | Data excluded from git | Large, reproducible, and not source code |
@@ -1429,19 +1467,19 @@ Real bugs, found by testing rather than reading:
   `simulate_demo_power.py` invents them. They are physically plausible and
   the heater responds to the real weather, but they are not measurements.
 
-- **The weather data currently displayed is real but not from your Pi.**
+- **The weather data currently displayed is observed data, not station output.**
   It's measured data for Višnjan's coordinates from Open-Meteo, standing in
   until the real station is connected. It includes a deliberate 2-day gap to
   demonstrate outage rendering.
 
 - **First run against an existing log folder sends everything.** Point the
   sender at a folder with months of history and it'll ship all of it once.
-  Intended, but worth knowing before you point it at a large archive.
+  Intended, but relevant before the tool is applied to a large archive.
 
 - **Nothing is deduplicated across machines.** If two Pis send files with
   the same name, they'll write to the same local file.
 
-- **The dashboard reloads every 60 seconds.** Fine for weather. If you move
+- **The dashboard reloads every 60 seconds.** Adequate for weather. If moved
   to fast logging, this becomes the limiting factor for what "live" means.
 
 - **A file open in an editor may block replacement.** The retry covers a

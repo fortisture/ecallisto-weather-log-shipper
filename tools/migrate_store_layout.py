@@ -12,6 +12,7 @@ or deleted -- a name collision is reported and skipped.
     python migrate_store_layout.py             # show what would move
     python migrate_store_layout.py --apply     # actually move
 """
+
 import argparse
 import os
 import shutil
@@ -21,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "station"))
 
-from receiver import date_subdir, UNDATED_DIR  # noqa: E402
+from receiver import UNDATED_DIR, date_subdir
 
 
 def already_nested(root, path):
@@ -31,9 +32,12 @@ def already_nested(root, path):
         return False
     year, month, day, _ = relative
     return (
-        len(year) == 4 and year.isdigit()
-        and len(month) == 2 and month.isdigit()
-        and len(day) == 2 and day.isdigit()
+        len(year) == 4
+        and year.isdigit()
+        and len(month) == 2
+        and month.isdigit()
+        and len(day) == 2
+        and day.isdigit()
     )
 
 
@@ -59,8 +63,11 @@ def plan_moves(root):
                 # in the old layout was itself the date.
                 folder = os.path.basename(current)
                 folder_parts = date_subdir(folder)
-                target_dir = os.path.join(root, *folder_parts) if folder_parts \
+                target_dir = (
+                    os.path.join(root, *folder_parts)
+                    if folder_parts
                     else os.path.join(root, UNDATED_DIR)
+                )
 
             target = os.path.join(target_dir, name)
             if os.path.abspath(target) != os.path.abspath(path):
@@ -85,9 +92,12 @@ def prune_empty(root):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--apply", action="store_true", help="perform the moves (default: dry run)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--apply", action="store_true", help="perform the moves (default: dry run)"
+    )
     ap.add_argument("--data-dir", default=os.path.join(ROOT, "data"))
     args = ap.parse_args()
 
@@ -100,8 +110,10 @@ def main():
         print(f"\n{store}: {len(moves)} file(s) to move  [{root}]")
 
         for source, target in moves[:5]:
-            print(f"  {os.path.relpath(source, root)}"
-                  f"  ->  {os.path.relpath(target, root)}")
+            print(
+                f"  {os.path.relpath(source, root)}"
+                f"  ->  {os.path.relpath(target, root)}"
+            )
         if len(moves) > 5:
             print(f"  ... and {len(moves) - 5} more")
 
@@ -117,7 +129,9 @@ def main():
                 moved += 1
 
             pruned = prune_empty(root)
-            print(f"  moved {moved}, skipped {skipped}, removed {pruned} empty folder(s)")
+            print(
+                f"  moved {moved}, skipped {skipped}, removed {pruned} empty folder(s)"
+            )
 
         total += len(moves)
 

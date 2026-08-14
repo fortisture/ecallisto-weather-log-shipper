@@ -30,6 +30,7 @@ layer means a compromised tunnel still cannot inject data.
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import getpass
 import os
@@ -42,14 +43,15 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SECRETS = os.path.join(HERE, "secrets")
 
-RECEIVER_PORT = 9443          # on the server, bound to localhost
-TUNNEL_PORT = 19443           # on the Pi, forwarded into the above
-HTTP_PORT = 8090              # on the server, bound to localhost
+RECEIVER_PORT = 9443  # on the server, bound to localhost
+TUNNEL_PORT = 19443  # on the Pi, forwarded into the above
+HTTP_PORT = 8090  # on the server, bound to localhost
 
 
 # --------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------
+
 
 def say(msg):
     print(msg, flush=True)
@@ -76,8 +78,10 @@ def run(cmd, check=True, quiet=False):
 
 def need_root(role):
     if os.name != "nt" and os.geteuid() != 0:
-        say(f"This needs root to install a service. Re-run:\n\n"
-            f"    sudo python3 install.py {role}\n")
+        say(
+            f"This needs root to install a service. Re-run:\n\n"
+            f"    sudo python3 install.py {role}\n"
+        )
         raise SystemExit(1)
 
 
@@ -95,6 +99,7 @@ def python_bin():
 # secrets
 # --------------------------------------------------------------------
 
+
 def make_secrets(force=False):
     """Create the TLS keypair and shared token used inside the tunnel."""
     os.makedirs(SECRETS, exist_ok=True)
@@ -110,9 +115,25 @@ def make_secrets(force=False):
         if not shutil.which("openssl"):
             say("  openssl not found -- install it:  sudo apt install openssl")
             raise SystemExit(1)
-        run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256",
-             "-days", "3650", "-nodes", "-keyout", key, "-out", cert,
-             "-subj", "/CN=dorm-receiver"])
+        run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-sha256",
+                "-days",
+                "3650",
+                "-nodes",
+                "-keyout",
+                key,
+                "-out",
+                cert,
+                "-subj",
+                "/CN=dorm-receiver",
+            ]
+        )
 
     if os.path.exists(token_file) and not force:
         say("  token already exists, keeping it")
@@ -123,9 +144,10 @@ def make_secrets(force=False):
             f.write(secrets.token_hex(32))
         os.chmod(token_file, 0o600)
 
-    fingerprint = run([
-        "openssl", "x509", "-in", cert, "-noout", "-fingerprint", "-sha256"
-    ], quiet=True)
+    fingerprint = run(
+        ["openssl", "x509", "-in", cert, "-noout", "-fingerprint", "-sha256"],
+        quiet=True,
+    )
     fingerprint = fingerprint.split("=", 1)[1].replace(":", "").lower()
 
     with open(fp_file, "w") as f:
@@ -175,7 +197,9 @@ def install_server(args):
     head("DORM server install (Ubuntu)")
     need_root("server")
 
-    user = args.user or ask("Run the service as which user?", os.environ.get("SUDO_USER", "dorm"))
+    user = args.user or ask(
+        "Run the service as which user?", os.environ.get("SUDO_USER", "dorm")
+    )
 
     say("\n[1/5] Generating TLS material and shared token")
     token, fingerprint = make_secrets(force=args.regenerate_secrets)
@@ -186,14 +210,16 @@ def install_server(args):
     for sub in ("weather", "power", "fits"):
         os.makedirs(os.path.join(HERE, "data", sub), exist_ok=True)
     if user:
-        run(["chown", "-R", f"{user}:{user}",
-             os.path.join(HERE, "data")], check=False)
+        run(["chown", "-R", f"{user}:{user}", os.path.join(HERE, "data")], check=False)
     say("  data/weather, data/power, data/fits ready")
 
     say("\n[3/5] Registering systemd service")
     unit = SERVER_UNIT.format(
-        user=user, root=HERE, python=python_bin(),
-        http_port=HTTP_PORT, rx_port=RECEIVER_PORT,
+        user=user,
+        root=HERE,
+        python=python_bin(),
+        http_port=HTTP_PORT,
+        rx_port=RECEIVER_PORT,
     )
     unit_path = "/etc/systemd/system/dorm-station.service"
     with open(unit_path, "w") as f:
@@ -225,7 +251,8 @@ def install_server(args):
     {SECRETS}/fingerprint.txt
 """)
 
-    say("""  NOTHING is listening publicly except sshd:
+    say(
+        """  NOTHING is listening publicly except sshd:
     receiver  127.0.0.1:%d   (reachable only through the SSH tunnel)
     web UI    127.0.0.1:%d   (put a reverse proxy in front for HTTPS)
 
@@ -233,7 +260,9 @@ def install_server(args):
     1. Add the Pi's SSH public key to ~%s/.ssh/authorized_keys
     2. Run the Pi installer:  sudo python3 install.py pi
     3. For a public site, see docs/DEPLOYMENT.md
-""" % (RECEIVER_PORT, HTTP_PORT, "/" + user))
+"""
+        % (RECEIVER_PORT, HTTP_PORT, "/" + user)
+    )
 
 
 # --------------------------------------------------------------------
@@ -296,16 +325,20 @@ def install_pi(args):
     ssh_user = args.ssh_user or ask("Server SSH username", "dorm")
     ssh_port = args.ssh_port or ask("Server SSH port", "22")
 
-    weather_dir = args.weather_dir or ask("Weather CSV directory on this Pi",
-                                          "/home/pi/ecallisto/weather_logs")
-    fits_dir = args.fits_dir or ask("CALLISTO FITS directory (blank to skip)",
-                                    "/home/pi/ecallisto/fits")
+    weather_dir = args.weather_dir or ask(
+        "Weather CSV directory on this Pi", "/home/pi/ecallisto/weather_logs"
+    )
+    fits_dir = args.fits_dir or ask(
+        "CALLISTO FITS directory (blank to skip)", "/home/pi/ecallisto/fits"
+    )
 
     token = args.token or getpass.getpass("  Shared token (from the server): ").strip()
     fingerprint = args.fingerprint or ask("Certificate fingerprint (from the server)")
 
     if not token or not fingerprint:
-        say("\n  token and fingerprint are both required -- run the server installer first.")
+        say(
+            "\n  token and fingerprint are both required -- run the server installer first."
+        )
         raise SystemExit(1)
 
     install_dir = args.install_dir
@@ -314,8 +347,19 @@ def install_pi(args):
     say("\n[1/6] SSH key for the tunnel")
     if not os.path.exists(keyfile):
         os.makedirs(os.path.dirname(keyfile), exist_ok=True)
-        run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", keyfile,
-             "-C", f"dorm-tunnel@{socket.gethostname()}"])
+        run(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                keyfile,
+                "-C",
+                f"dorm-tunnel@{socket.gethostname()}",
+            ]
+        )
         run(["chown", "-R", f"{user}:{user}", os.path.dirname(keyfile)], check=False)
     else:
         say("  key already exists, keeping it")
@@ -325,10 +369,12 @@ def install_pi(args):
 
     say("\n[2/6] Installing sender")
     os.makedirs(install_dir, exist_ok=True)
-    shutil.copy2(os.path.join(HERE, "pi", "sender.py"), os.path.join(install_dir, "sender.py"))
+    shutil.copy2(
+        os.path.join(HERE, "pi", "sender.py"), os.path.join(install_dir, "sender.py")
+    )
 
     config = {
-        "host": "127.0.0.1",          # the local end of the SSH tunnel
+        "host": "127.0.0.1",  # the local end of the SSH tunnel
         "port": int(TUNNEL_PORT),
         "token": token,
         "fingerprint": fingerprint,
@@ -339,6 +385,7 @@ def install_pi(args):
         config["fits_dir"] = fits_dir
 
     import json
+
     config_path = os.path.join(install_dir, "config.json")
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
@@ -351,15 +398,23 @@ def install_pi(args):
 
     say("\n[3/6] Registering the SSH tunnel service")
     with open("/etc/systemd/system/dorm-tunnel.service", "w") as f:
-        f.write(TUNNEL_UNIT.format(
-            user=user, keyfile=keyfile, local_port=TUNNEL_PORT,
-            remote_port=RECEIVER_PORT, ssh_user=ssh_user,
-            ssh_host=ssh_host, ssh_port=ssh_port,
-        ))
+        f.write(
+            TUNNEL_UNIT.format(
+                user=user,
+                keyfile=keyfile,
+                local_port=TUNNEL_PORT,
+                remote_port=RECEIVER_PORT,
+                ssh_user=ssh_user,
+                ssh_host=ssh_host,
+                ssh_port=ssh_port,
+            )
+        )
 
     say("\n[4/6] Registering the sender service")
     with open("/etc/systemd/system/dorm-sender.service", "w") as f:
-        f.write(SENDER_UNIT.format(user=user, python=python_bin(), install_dir=install_dir))
+        f.write(
+            SENDER_UNIT.format(user=user, python=python_bin(), install_dir=install_dir)
+        )
 
     run(["systemctl", "daemon-reload"])
 
@@ -392,6 +447,7 @@ def install_pi(args):
 # check role
 # --------------------------------------------------------------------
 
+
 def check(args):
     head("DORM install check")
 
@@ -404,9 +460,16 @@ def check(args):
         ok = False
 
     say("\nProject files")
-    for rel in ("station/server.py", "station/receiver.py", "station/api.py",
-                "station/status.py", "pi/sender.py", "web/index.html",
-                "web/common.js", "web/vendor/chart.js"):
+    for rel in (
+        "station/server.py",
+        "station/receiver.py",
+        "station/api.py",
+        "station/status.py",
+        "pi/sender.py",
+        "web/index.html",
+        "web/common.js",
+        "web/vendor/chart.js",
+    ):
         path = os.path.join(HERE, rel)
         mark = "ok  " if os.path.exists(path) else "MISSING"
         say(f"  [{mark}] {rel}")
@@ -439,9 +502,11 @@ def check(args):
 
 # --------------------------------------------------------------------
 
+
 def main():
     ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("role", choices=["server", "pi", "check", "secrets"])
     ap.add_argument("--user")
     ap.add_argument("--ssh-host")

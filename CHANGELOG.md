@@ -5,6 +5,54 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.8.0] - 2026-08-15
+
+### Security — denial-of-service hardening
+An authorised penetration test was run against a local instance. The
+application layer (path traversal, directory listing, authentication,
+certificate pinning, header injection, malformed input) held on the first
+pass. The one weak class was the absence of resource limits, which is now
+closed.
+
+- **Receiver:** a pre-handshake socket timeout, a post-authentication idle
+  timeout, a global concurrent-connection cap, and a per-source-address
+  cap. Previously 200 connections that completed the TLS handshake and then
+  sent nothing were all accepted and held indefinitely; now a single source
+  obtains only a few slots and a stalled connection is dropped.
+- **HTTP server:** a request-read timeout (defeats slowloris), a global
+  worker cap, and a per-source cap. The per-source cap is the decisive
+  control — verified that during a 100-connection flood from one address, a
+  request from a different address is still served. Defeating the service
+  now requires many source addresses, which is the reverse proxy's domain.
+- Both accept loops are now the single hardened `receiver.serve`, so the
+  server and the standalone receiver cannot drift apart.
+
+### Changed
+- **README and technical guide rewritten in an objective register.** Both
+  described the system in a conversational, second-person style; they now
+  read as technical documentation. The guide gains a security-model
+  subsection covering the availability limits above and the controls for
+  co-hosting a database and a second site. DEPLOYMENT.md gains a full
+  co-hosting section: per-service accounts, loopback-only database binding,
+  least-privilege roles, parameterised queries, and per-service systemd
+  sandboxing.
+- **Python formatted to the standard style** (ruff format) across
+  `station/`, `pi/`, `tools/`, and `install.py`. Formatting only; the 49
+  stress tests and 9 functional-attack checks pass unchanged.
+- A closure-over-loop-variable pattern in `tools/fetch_weather.py` was
+  bound explicitly. It was safe (the helper was only ever called within the
+  same iteration) but fragile.
+
+### Fixed
+- **Power-chart tooltips showed the median value twice.** The reference
+  line's dataset label already contains its value (e.g. "Median 66 mA"),
+  and the tooltip appended the value again, producing "Median 66 mA 66 mA".
+  The tooltip now shows a reference line's label alone. This is fixed in
+  the shared chart helper (`common.js`) and the two custom tooltips
+  (`power.html`, `sun.html`), so it covers the power charts and the sun
+  daylight chart. The weather page used a different callback and was never
+  affected.
+
 ## [4.7.0] - 2026-08-14
 
 ### Fixed

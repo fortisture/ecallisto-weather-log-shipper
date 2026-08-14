@@ -30,3 +30,4 @@ __pycache__/
 server.log
 web/gallery/*
 !web/gallery/gallery.json
+SECURITY-AUDIT-*.txt

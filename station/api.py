@@ -23,6 +23,7 @@ treating them as local time.
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import csv
 import glob
@@ -58,8 +59,7 @@ def find_field(fieldnames, *candidates):
     # and the whole file would be skipped as "not a weather log". Files are
     # opened as utf-8-sig so this should never trigger, but a BOM can also
     # appear mid-file after a careless concatenation.
-    lowered = {name.strip().lstrip("﻿").lower(): name
-               for name in fieldnames if name}
+    lowered = {name.strip().lstrip("﻿").lower(): name for name in fieldnames if name}
     for candidate in candidates:
         if candidate in lowered:
             return lowered[candidate]
@@ -98,9 +98,7 @@ def find_csv_files(incoming_dir):
     nothing. Sorted by path, which for this layout is also chronological
     order -- zero-padded date components sort correctly as text.
     """
-    return sorted(
-        glob.glob(os.path.join(incoming_dir, "**", "*.csv"), recursive=True)
-    )
+    return sorted(glob.glob(os.path.join(incoming_dir, "**", "*.csv"), recursive=True))
 
 
 def load_all_readings(incoming_dir):
@@ -111,10 +109,14 @@ def load_all_readings(incoming_dir):
                 reader = csv.DictReader(f)
                 if not reader.fieldnames:
                     continue
-                ts_field = find_field(reader.fieldnames, "timestamp", "time", "datetime")
+                ts_field = find_field(
+                    reader.fieldnames, "timestamp", "time", "datetime"
+                )
                 if not ts_field:
                     continue  # not one of our weather logs -- skip quietly
-                temp_field = find_field(reader.fieldnames, "temp_c", "temperature", "temp")
+                temp_field = find_field(
+                    reader.fieldnames, "temp_c", "temperature", "temp"
+                )
                 humidity_field = find_field(
                     reader.fieldnames, "humidity_pct", "humidity", "rh"
                 )
@@ -127,16 +129,24 @@ def load_all_readings(incoming_dir):
                     if ts is None:
                         continue
                     temp = parse_number(row.get(temp_field)) if temp_field else None
-                    humidity = parse_number(row.get(humidity_field)) if humidity_field else None
-                    readings.append({
-                        "timestamp": ts,
-                        "temp_c": temp,
-                        "humidity_pct": humidity,
-                        "pressure_hpa": (
-                            parse_number(row.get(pressure_field)) if pressure_field else None
-                        ),
-                        "dew_point_c": dew_point_c(temp, humidity),
-                    })
+                    humidity = (
+                        parse_number(row.get(humidity_field))
+                        if humidity_field
+                        else None
+                    )
+                    readings.append(
+                        {
+                            "timestamp": ts,
+                            "temp_c": temp,
+                            "humidity_pct": humidity,
+                            "pressure_hpa": (
+                                parse_number(row.get(pressure_field))
+                                if pressure_field
+                                else None
+                            ),
+                            "dew_point_c": dew_point_c(temp, humidity),
+                        }
+                    )
         except (OSError, csv.Error):
             continue
 
@@ -174,7 +184,10 @@ def insert_gap_markers(readings, gap_factor=3.0):
         out.append(reading)
         if i + 1 < len(readings) and (times[i + 1] - times[i]) > threshold:
             marker_time = datetime.fromtimestamp(times[i] + median, tz=timezone.utc)
-            marker = {"timestamp": marker_time.strftime("%Y-%m-%dT%H:%M:%SZ"), "gap": True}
+            marker = {
+                "timestamp": marker_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "gap": True,
+            }
             marker.update({key: None for key in value_keys})
             out.append(marker)
 
@@ -214,7 +227,9 @@ def load_power_readings(power_dir):
                 if not reader.fieldnames:
                     continue
 
-                ts_field = find_field(reader.fieldnames, "timestamp", "time", "datetime")
+                ts_field = find_field(
+                    reader.fieldnames, "timestamp", "time", "datetime"
+                )
                 if not ts_field:
                     continue
 
@@ -239,7 +254,9 @@ def load_power_readings(power_dir):
 
                     entry = {"timestamp": ts}
                     for column, source in fields.items():
-                        entry[column] = parse_number(row.get(source)) if source else None
+                        entry[column] = (
+                            parse_number(row.get(source)) if source else None
+                        )
                     readings.append(entry)
 
         except (OSError, csv.Error):
@@ -288,16 +305,21 @@ def generate_power(power_dir, api_dir):
     else:
         latest = {
             "timestamp": None,
-            "rails": {key: {"label": label, "volts": None, "milliamps": None, "watts": None}
-                      for key, label in SUBSYSTEMS},
+            "rails": {
+                key: {"label": label, "volts": None, "milliamps": None, "watts": None}
+                for key, label in SUBSYSTEMS
+            },
             "total_watts": None,
         }
 
     write_json_atomic(os.path.join(api_dir, "latest.json"), latest)
-    write_json_atomic(os.path.join(api_dir, "history.json"), {
-        "subsystems": [{"key": key, "label": label} for key, label in SUBSYSTEMS],
-        "readings": readings,
-    })
+    write_json_atomic(
+        os.path.join(api_dir, "history.json"),
+        {
+            "subsystems": [{"key": key, "label": label} for key, label in SUBSYSTEMS],
+            "readings": readings,
+        },
+    )
 
     rail_fields = [f"{key}_{suffix}" for key, _ in SUBSYSTEMS for suffix in ("v", "ma")]
     write_range_files(readings, api_dir, POWER_RANGES, rail_fields)
@@ -320,13 +342,14 @@ def generate(incoming_dir, api_dir, history_hours):
         # the selected range (1D/7D/30D/all) client-side, so the API has to
         # carry more than the shortest range.
         if history_hours > 0:
-            cutoff_dt = (
-                datetime.fromisoformat(last["timestamp"].replace("Z", "+00:00"))
-                - timedelta(hours=history_hours)
-            )
+            cutoff_dt = datetime.fromisoformat(
+                last["timestamp"].replace("Z", "+00:00")
+            ) - timedelta(hours=history_hours)
             history_readings = [
-                r for r in readings
-                if datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")) >= cutoff_dt
+                r
+                for r in readings
+                if datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+                >= cutoff_dt
             ]
         else:
             history_readings = readings
@@ -336,7 +359,9 @@ def generate(incoming_dir, api_dir, history_hours):
         history_readings = []
 
     write_json_atomic(os.path.join(api_dir, "latest.json"), latest_out)
-    write_json_atomic(os.path.join(api_dir, "history.json"), {"readings": history_readings})
+    write_json_atomic(
+        os.path.join(api_dir, "history.json"), {"readings": history_readings}
+    )
     write_range_files(history_readings, api_dir, WEATHER_RANGES, fields)
 
     # Report measurements, not the synthetic gap markers mixed in with them
@@ -441,12 +466,15 @@ def write_range_files(readings, api_dir, ranges, value_keys):
 
     # An index so the page can render its range buttons from the API
     # rather than hard-coding a list that could drift out of step.
-    write_json_atomic(os.path.join(api_dir, "ranges.json"), {
-        "ranges": [
-            {"slug": slug, "hours": hours, "points": written.get(slug, 0)}
-            for slug, hours in ranges
-        ]
-    })
+    write_json_atomic(
+        os.path.join(api_dir, "ranges.json"),
+        {
+            "ranges": [
+                {"slug": slug, "hours": hours, "points": written.get(slug, 0)}
+                for slug, hours in ranges
+            ]
+        },
+    )
     return written
 
 
@@ -483,12 +511,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--incoming-dir",
-        default=os.path.join(os.path.dirname(__file__), "..", "windows", "incoming_logs"),
+        default=os.path.join(
+            os.path.dirname(__file__), "..", "windows", "incoming_logs"
+        ),
     )
     ap.add_argument(
         "--api-dir",
-        default=os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                             "data", "api", "weather"),
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "data", "api", "weather"
+        ),
     )
     ap.add_argument(
         "--history-hours",
@@ -510,8 +541,14 @@ def main():
         digest = hash_dir(incoming_dir)
         if digest != last_hash:
             total, windowed = generate(incoming_dir, api_dir, args.history_hours)
-            window = f"{args.history_hours:g}h window" if args.history_hours > 0 else "no cap"
-            log(f"regenerated dashboard API: {total} total readings, {windowed} emitted ({window})")
+            window = (
+                f"{args.history_hours:g}h window"
+                if args.history_hours > 0
+                else "no cap"
+            )
+            log(
+                f"regenerated dashboard API: {total} total readings, {windowed} emitted ({window})"
+            )
             last_hash = digest
         if args.once:
             break

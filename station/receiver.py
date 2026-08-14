@@ -18,6 +18,7 @@ configured directories.
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import hmac
 import os
@@ -93,7 +94,11 @@ def date_subdir(name):
 def store_path(root, name):
     """Full path for a file inside a year/month/day store."""
     parts = date_subdir(name)
-    return os.path.join(root, *parts, name) if parts else os.path.join(root, UNDATED_DIR, name)
+    return (
+        os.path.join(root, *parts, name)
+        if parts
+        else os.path.join(root, UNDATED_DIR, name)
+    )
 
 
 # Which CSVs are power-rail telemetry rather than weather. Routed on the
@@ -155,6 +160,14 @@ def write_atomic(out_path, content):
 
 def handle_client(raw_conn, addr, cfg, ctx, lock):
     peer = f"{addr[0]}:{addr[1]}"
+
+    # A deadline on the raw socket before the handshake, so a client that
+    # opens a connection and then sends nothing -- the cheapest denial-of-
+    # service there is -- cannot pin a thread indefinitely. It is refreshed
+    # after authentication, since a legitimate sender may hold the
+    # connection open for a long time between rows.
+    raw_conn.settimeout(cfg.get("handshake_timeout", 30))
+
     try:
         conn = ctx.wrap_socket(raw_conn, server_side=True)
     except (ssl.SSLError, OSError) as e:
@@ -173,7 +186,7 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
             log(f"{peer}: missing AUTH line, closing")
             return
 
-        token = line[len(b"AUTH "):].strip().decode("utf-8", errors="replace")
+        token = line[len(b"AUTH ") :].strip().decode("utf-8", errors="replace")
         if not hmac.compare_digest(token, cfg["token"]):
             conn.sendall(b"DENY\n")
             log(f"{peer}: bad token, closing")
@@ -181,6 +194,11 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
 
         conn.sendall(b"OK\n")
         log(f"{peer}: authenticated")
+
+        # Authenticated: allow long idle periods between rows, but still
+        # bounded, so a client that authenticates and then goes silent is
+        # eventually reaped rather than holding a slot for ever.
+        conn.settimeout(cfg.get("idle_timeout", 900))
 
         while True:
             line = f.readline()
@@ -224,7 +242,9 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                 if verb == b"FILE":
                     name = safe_filename(raw)
                     if not name:
-                        log(f"{peer}: rejected unsafe filename in FILE, discarded {length} bytes")
+                        log(
+                            f"{peer}: rejected unsafe filename in FILE, discarded {length} bytes"
+                        )
                         continue
                     out_path = store_path(csv_store_root(cfg, name), name)
                     file_count += 1
@@ -244,11 +264,15 @@ def handle_client(raw_conn, addr, cfg, ctx, lock):
                 log(f"{peer}: unknown verb {verb!r}, closing")
                 break
 
+    except TimeoutError:
+        log(f"{peer}: idle timeout, closing")
     except (OSError, ssl.SSLError, ConnectionError) as e:
         log(f"{peer}: connection error: {e}")
     finally:
         conn.close()
-        log(f"{peer}: disconnected ({row_count} rows, {file_count} file replacements, {blob_count} spectrograms)")
+        log(
+            f"{peer}: disconnected ({row_count} rows, {file_count} file replacements, {blob_count} spectrograms)"
+        )
 
 
 def main():
@@ -259,8 +283,20 @@ def main():
     ap.add_argument("--key", default="key.pem")
     ap.add_argument("--token-file", default="token.txt")
     ap.add_argument("--outdir", default="incoming_logs")
-    ap.add_argument("--blobdir", default=None, help="where to store incoming spectrograms")
-    ap.add_argument("--powerdir", default=None, help="where to store incoming power telemetry")
+    ap.add_argument(
+        "--blobdir", default=None, help="where to store incoming spectrograms"
+    )
+    ap.add_argument(
+        "--powerdir", default=None, help="where to store incoming power telemetry"
+    )
+    ap.add_argument(
+        "--max-connections",
+        type=int,
+        default=16,
+        help="concurrent client cap. One legitimate sender needs a single "
+        "connection, so this is generous; it exists to bound the cost "
+        "of an attacker opening many at once.",
+    )
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -269,30 +305,93 @@ def main():
             os.makedirs(extra, exist_ok=True)
     with open(args.token_file) as f:
         token = f.read().strip()
-    cfg = {"token": token, "outdir": args.outdir,
-           "blobdir": args.blobdir, "powerdir": args.powerdir}
+    cfg = {
+        "token": token,
+        "outdir": args.outdir,
+        "blobdir": args.blobdir,
+        "powerdir": args.powerdir,
+    }
 
+    serve(args.host, args.port, args.cert, args.key, cfg, args.max_connections)
+
+
+def serve(host, port, cert, key, cfg, max_connections):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)
+    ctx.load_cert_chain(certfile=cert, keyfile=key)
 
     lock = threading.Lock()
+
+    # A ceiling on concurrent clients. A legitimate deployment has exactly
+    # one sender, so any large number of simultaneous connections is an
+    # attack; the semaphore bounds how many threads that can ever cost.
+    slots = threading.BoundedSemaphore(max_connections)
+
+    # A per-address ceiling on top of the global one. Combined with the
+    # handshake timeout, this is what stops one host holding every slot by
+    # opening connections and sending nothing: it can occupy at most a few,
+    # and the rest stay free for the real sender.
+    per_ip_limit = max(2, max_connections // 4)
+    per_ip = {}
+    per_ip_lock = threading.Lock()
+
+    def ip_acquire(ip):
+        with per_ip_lock:
+            if per_ip.get(ip, 0) >= per_ip_limit:
+                return False
+            per_ip[ip] = per_ip.get(ip, 0) + 1
+            return True
+
+    def ip_release(ip):
+        with per_ip_lock:
+            n = per_ip.get(ip, 0) - 1
+            if n <= 0:
+                per_ip.pop(ip, None)
+            else:
+                per_ip[ip] = n
+
+    def worker(raw_conn, addr):
+        try:
+            handle_client(raw_conn, addr, cfg, ctx, lock)
+        finally:
+            slots.release()
+            ip_release(addr[0])
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((args.host, args.port))
+    sock.bind((host, port))
     sock.listen(5)
-    log(f"listening on {args.host}:{args.port}, writing rows to {os.path.abspath(args.outdir)}")
+    log(f"listening on {host}:{port}, writing rows to {os.path.abspath(cfg['outdir'])}")
 
     try:
         while True:
             raw_conn, addr = sock.accept()
-            t = threading.Thread(
-                target=handle_client, args=(raw_conn, addr, cfg, ctx, lock), daemon=True
-            )
-            t.start()
+
+            # Refuse rather than queue when full: a caller kept waiting is a
+            # caller holding a kernel socket, which is the resource we are
+            # trying to protect. The rejected client simply retries later.
+            if not ip_acquire(addr[0]):
+                log(f"{addr[0]}:{addr[1]}: per-source limit, refusing")
+                _close(raw_conn)
+                continue
+
+            if not slots.acquire(blocking=False):
+                log(f"{addr[0]}:{addr[1]}: at connection limit, refusing")
+                ip_release(addr[0])
+                _close(raw_conn)
+                continue
+
+            threading.Thread(target=worker, args=(raw_conn, addr), daemon=True).start()
     except KeyboardInterrupt:
         log("stopping")
     finally:
         sock.close()
+
+
+def _close(conn):
+    try:
+        conn.close()
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

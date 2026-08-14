@@ -20,6 +20,7 @@ what was last sent for that file:
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import glob
 import hashlib
@@ -71,13 +72,15 @@ def connect(cfg):
         )
 
     sock.settimeout(30)
-    sock.sendall(f"AUTH {cfg['token']}\n".encode("utf-8"))
+    sock.sendall(f"AUTH {cfg['token']}\n".encode())
     reply = sock.makefile("rb").readline().strip()
     if reply != b"OK":
         sock.close()
         raise PermissionError(f"receiver rejected auth: {reply!r}")
 
-    log(f"connected to {cfg['host']}:{cfg['port']}, fingerprint verified, authenticated")
+    log(
+        f"connected to {cfg['host']}:{cfg['port']}, fingerprint verified, authenticated"
+    )
     return sock
 
 
@@ -96,7 +99,9 @@ def scan_and_send_blobs(sock, cfg, state):
         return
 
     for pattern in ("*.fit.gz", "*.fit", "*.fits", "*.fits.gz"):
-        for path in sorted(glob.glob(os.path.join(fits_dir, "**", pattern), recursive=True)):
+        for path in sorted(
+            glob.glob(os.path.join(fits_dir, "**", pattern), recursive=True)
+        ):
             name = os.path.basename(path)
             key = "blob:" + name
 
@@ -121,12 +126,15 @@ def scan_and_send_blobs(sock, cfg, state):
             except OSError:
                 continue
 
-            sock.sendall(f"BLOB\t{name}\t{len(data)}\n".encode("utf-8"))
+            sock.sendall(f"BLOB\t{name}\t{len(data)}\n".encode())
             if data:
                 sock.sendall(data)
 
-            state[key] = {"length": len(data), "mtime": mtime,
-                          "hash": hashlib.sha256(data).hexdigest()}
+            state[key] = {
+                "length": len(data),
+                "mtime": mtime,
+                "hash": hashlib.sha256(data).hexdigest(),
+            }
             save_state(cfg["state_file"], state)
             log(f"sent spectrogram {name} ({len(data)} bytes)")
 
@@ -162,7 +170,10 @@ def scan_and_send(sock, cfg, state):
         if len(data) == prev_len and hashlib.sha256(data).hexdigest() == prev_hash:
             continue  # unchanged since we last checked
 
-        if len(data) >= prev_len and hashlib.sha256(data[:prev_len]).hexdigest() == prev_hash:
+        if (
+            len(data) >= prev_len
+            and hashlib.sha256(data[:prev_len]).hexdigest() == prev_hash
+        ):
             # Pure append.
             pos = prev_len
             while True:
@@ -173,32 +184,45 @@ def scan_and_send(sock, cfg, state):
                 pos = nl + 1
                 if line:
                     text = line.decode("utf-8", errors="replace")
-                    sock.sendall(f"ROW\t{name}\t{text}\n".encode("utf-8"))
-                state[name] = {"length": pos, "hash": hashlib.sha256(data[:pos]).hexdigest()}
+                    sock.sendall(f"ROW\t{name}\t{text}\n".encode())
+                state[name] = {
+                    "length": pos,
+                    "hash": hashlib.sha256(data[:pos]).hexdigest(),
+                }
                 save_state(cfg["state_file"], state)
         else:
             # In-place edit, or the file got shorter (rotated/truncated) --
             # ship the whole current file and let the receiver replace its
             # copy wholesale. A resend of identical content on retry is
             # harmless, since this is a full replace, not an append.
-            header = f"FILE\t{name}\t{len(data)}\n".encode("utf-8")
+            header = f"FILE\t{name}\t{len(data)}\n".encode()
             sock.sendall(header)
             if data:
                 sock.sendall(data)
-            state[name] = {"length": len(data), "hash": hashlib.sha256(data).hexdigest()}
+            state[name] = {
+                "length": len(data),
+                "hash": hashlib.sha256(data).hexdigest(),
+            }
             save_state(cfg["state_file"], state)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("config", help="path to a JSON config file (see pi/config.example.json)")
-    ap.add_argument("--poll-interval", type=float, default=1.0, help="seconds between directory scans")
+    ap.add_argument(
+        "config", help="path to a JSON config file (see pi/config.example.json)"
+    )
+    ap.add_argument(
+        "--poll-interval",
+        type=float,
+        default=1.0,
+        help="seconds between directory scans",
+    )
     ap.add_argument(
         "--resync-hours",
         type=float,
         default=6.0,
         help="periodically re-send everything, so a server-side loss or a "
-             "crash mid-transfer heals itself (0 disables)",
+        "crash mid-transfer heals itself (0 disables)",
     )
     args = ap.parse_args()
 
@@ -206,13 +230,17 @@ def main():
         cfg = json.load(f)
     cfg.setdefault(
         "state_file",
-        os.path.join(os.path.dirname(os.path.abspath(args.config)), ".sender_state.json"),
+        os.path.join(
+            os.path.dirname(os.path.abspath(args.config)), ".sender_state.json"
+        ),
     )
 
     state = load_state(cfg["state_file"])
     backoff = 1
     sock = None
-    next_resync = time.time() + args.resync_hours * 3600 if args.resync_hours > 0 else None
+    next_resync = (
+        time.time() + args.resync_hours * 3600 if args.resync_hours > 0 else None
+    )
 
     while True:
         try:

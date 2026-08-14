@@ -319,6 +319,10 @@ const DORM = (function () {
           callbacks: {
             label: item => {
               if (item.parsed.y === null) return "no data";
+              // A reference line's label already carries its value
+              // (e.g. "Median 12.3 h"); appending the value again would
+              // print it twice. Reference lines are the dashed datasets.
+              if (item.dataset.borderDash) return item.dataset.label;
               const label = item.dataset.label ? item.dataset.label + "  " : "";
               return label + item.parsed.y.toFixed(decimals) + " " + unit;
             }

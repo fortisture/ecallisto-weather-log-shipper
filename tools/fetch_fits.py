@@ -10,6 +10,7 @@ archive serves them -- the viewer decompresses in the browser.
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import os
 import re
@@ -92,14 +93,26 @@ def find_recent_days(wanted, search_back, end_day):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--days", type=int, default=3, help="how many days WITH DATA to fetch")
-    ap.add_argument("--end", default=None, help="search backwards from this YYYY-MM-DD (default: today)")
-    ap.add_argument("--search-back", type=int, default=420, help="max calendar days to search")
+    ap.add_argument(
+        "--days", type=int, default=3, help="how many days WITH DATA to fetch"
+    )
+    ap.add_argument(
+        "--end",
+        default=None,
+        help="search backwards from this YYYY-MM-DD (default: today)",
+    )
+    ap.add_argument(
+        "--search-back", type=int, default=420, help="max calendar days to search"
+    )
     ap.add_argument(
         "--store",
-        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "fits"),
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "fits"
+        ),
     )
-    ap.add_argument("--date", action="append", help="fetch a specific YYYY-MM-DD (repeatable)")
+    ap.add_argument(
+        "--date", action="append", help="fetch a specific YYYY-MM-DD (repeatable)"
+    )
     args = ap.parse_args()
 
     store = os.path.abspath(args.store)
@@ -115,7 +128,9 @@ def main():
             if names:
                 targets.append((day, names))
     else:
-        end_day = datetime.strptime(args.end, "%Y-%m-%d").date() if args.end else date.today()
+        end_day = (
+            datetime.strptime(args.end, "%Y-%m-%d").date() if args.end else date.today()
+        )
         print(f"searching backwards from {end_day} for {args.days} day(s) with data...")
         targets = find_recent_days(args.days, args.search_back, end_day)
 

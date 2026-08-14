@@ -24,6 +24,7 @@ What is modelled:
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import csv
 import glob
@@ -34,10 +35,14 @@ from datetime import datetime, timedelta, timezone
 
 HEADER = [
     "timestamp",
-    "heater_v", "heater_ma",
-    "lna_v", "lna_ma",
-    "callisto_v", "callisto_ma",
-    "bme_v", "bme_ma",
+    "heater_v",
+    "heater_ma",
+    "lna_v",
+    "lna_ma",
+    "callisto_v",
+    "callisto_ma",
+    "bme_v",
+    "bme_ma",
 ]
 
 
@@ -84,13 +89,25 @@ def nearest_weather(points, when):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--days", type=int, default=35)
     ap.add_argument("--interval-minutes", type=float, default=15.0)
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "power"))
-    ap.add_argument("--weather-dir",
-                    default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "weather"))
+    ap.add_argument(
+        "--out",
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "power"
+        ),
+    )
+    ap.add_argument(
+        "--weather-dir",
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data",
+            "weather",
+        ),
+    )
     ap.add_argument("--seed", type=int, default=5)
     args = ap.parse_args()
 
@@ -139,13 +156,19 @@ def main():
         bme_ma = 3.1 + random.gauss(0, 0.15)
         bme_v = 3.30 + random.gauss(0, 0.005)
 
-        rows.append([
-            when.strftime("%Y-%m-%d %H:%M:%S"),
-            round(heater_v, 2), round(heater_ma, 1),
-            round(lna_v, 2), round(lna_ma, 1),
-            round(callisto_v, 2), round(callisto_ma, 1),
-            round(bme_v, 3), round(bme_ma, 2),
-        ])
+        rows.append(
+            [
+                when.strftime("%Y-%m-%d %H:%M:%S"),
+                round(heater_v, 2),
+                round(heater_ma, 1),
+                round(lna_v, 2),
+                round(lna_ma, 1),
+                round(callisto_v, 2),
+                round(callisto_ma, 1),
+                round(bme_v, 3),
+                round(bme_ma, 2),
+            ]
+        )
         when += step
 
     store = os.path.abspath(args.out)
@@ -159,13 +182,19 @@ def main():
         out_dir = os.path.join(store, year, month, dd)
         os.makedirs(out_dir, exist_ok=True)
 
-        with open(os.path.join(out_dir, f"power_{year}{month}{dd}.csv"),
-                  "w", newline="", encoding="utf-8") as f:
+        with open(
+            os.path.join(out_dir, f"power_{year}{month}{dd}.csv"),
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as f:
             writer = csv.writer(f)
             writer.writerow(HEADER)
             writer.writerows(day_rows)
 
-    print(f"wrote {len(rows)} SIMULATED readings across {len(by_day)} day-files under {store}")
+    print(
+        f"wrote {len(rows)} SIMULATED readings across {len(by_day)} day-files under {store}"
+    )
     print(f"first: {rows[0]}")
     print(f"last:  {rows[-1]}")
 

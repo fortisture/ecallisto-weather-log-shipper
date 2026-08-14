@@ -12,6 +12,7 @@ Višnjan coordinates, not simulated.
 
 Dependency-free: standard library only.
 """
+
 import argparse
 import csv
 import json
@@ -37,8 +38,24 @@ HOURLY_FIELDS = [
     "wind_direction_10m",
 ]
 
-COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-           "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+COMPASS = [
+    "N",
+    "NNE",
+    "NE",
+    "ENE",
+    "E",
+    "ESE",
+    "SE",
+    "SSE",
+    "S",
+    "SSW",
+    "SW",
+    "WSW",
+    "W",
+    "WNW",
+    "NW",
+    "NNW",
+]
 
 
 def degrees_to_compass(degrees):
@@ -70,9 +87,10 @@ def fetch_range(start, end):
     merged = {}
 
     try:
-        archive = fetch(ARCHIVE_URL, dict(
-            common, start_date=start.isoformat(), end_date=end.isoformat()
-        ))
+        archive = fetch(
+            ARCHIVE_URL,
+            dict(common, start_date=start.isoformat(), end_date=end.isoformat()),
+        )
         merged.update(rows_from(archive))
     except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
         print(f"archive fetch failed ({e}); relying on the forecast endpoint")
@@ -94,7 +112,11 @@ def rows_from(payload):
     out = {}
 
     for i, stamp in enumerate(times):
-        def value(field):
+        # i is bound as a default so the helper closes over this iteration's
+        # index rather than the loop variable -- it is only ever called
+        # within the same iteration, but binding makes that correct by
+        # construction rather than by luck.
+        def value(field, i=i):
             series = hourly.get(field) or []
             return series[i] if i < len(series) else None
 
@@ -103,7 +125,9 @@ def rows_from(payload):
             continue  # a row without a temperature isn't a usable reading
 
         out[stamp] = [
-            stamp.replace("T", " ") + ":00" if len(stamp) == 16 else stamp.replace("T", " "),
+            stamp.replace("T", " ") + ":00"
+            if len(stamp) == 16
+            else stamp.replace("T", " "),
             temp,
             value("relative_humidity_2m"),
             value("surface_pressure"),
@@ -119,7 +143,11 @@ def main():
     ap.add_argument("--days", type=int, default=35, help="how many days back to fetch")
     ap.add_argument(
         "--out",
-        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "weather"),
+        default=os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data",
+            "weather",
+        ),
         help="root of the weather store; files are written to <root>/YYYY/MM/DD/",
     )
     ap.add_argument(
@@ -127,7 +155,7 @@ def main():
         nargs=2,
         metavar=("START_DATE", "DAYS"),
         help="drop readings for DAYS days from START_DATE, to exercise the "
-             "dashboard's data-gap rendering (e.g. --simulate-outage 2026-07-25 2)",
+        "dashboard's data-gap rendering (e.g. --simulate-outage 2026-07-25 2)",
     )
     args = ap.parse_args()
 
@@ -146,8 +174,13 @@ def main():
         outage_end = outage_start + timedelta(days=float(args.simulate_outage[1]))
         before = len(rows)
         rows = [
-            row for row in rows
-            if not (outage_start <= datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S") < outage_end)
+            row
+            for row in rows
+            if not (
+                outage_start
+                <= datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+                < outage_end
+            )
         ]
         print(
             f"simulated outage {outage_start:%Y-%m-%d} for {args.simulate_outage[1]} day(s): "
@@ -156,8 +189,12 @@ def main():
 
     store = os.path.abspath(args.out)
     header = [
-        "timestamp", "temp_c", "humidity_pct",
-        "pressure_hpa", "wind_speed_kmh", "wind_dir",
+        "timestamp",
+        "temp_c",
+        "humidity_pct",
+        "pressure_hpa",
+        "wind_speed_kmh",
+        "wind_dir",
     ]
 
     # One file per day, in a year/month/day tree -- the same shape the real
@@ -165,7 +202,7 @@ def main():
     # layout the receiver writes into.
     by_day = {}
     for row in rows:
-        day = row[0][:10]                       # "2026-08-13"
+        day = row[0][:10]  # "2026-08-13"
         by_day.setdefault(day, []).append(row)
 
     for day, day_rows in sorted(by_day.items()):
@@ -179,7 +216,9 @@ def main():
             writer.writerow(header)
             writer.writerows(day_rows)
 
-    print(f"wrote {len(rows)} hourly readings across {len(by_day)} day-files under {store}")
+    print(
+        f"wrote {len(rows)} hourly readings across {len(by_day)} day-files under {store}"
+    )
     print(f"first: {rows[0]}")
     print(f"last:  {rows[-1]}")
 

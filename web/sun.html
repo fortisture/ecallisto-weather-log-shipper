@@ -385,6 +385,8 @@
         };
         opts.plugins.tooltip.callbacks.label = item => {
           if (item.parsed.y === null) return "no data";
+          // A dashed reference line's label already contains its value.
+          if (item.dataset.borderDash) return item.dataset.label;
           const h = Math.floor(item.parsed.y);
           const m = Math.round((item.parsed.y - h) * 60);
           return item.dataset.label + "  " +

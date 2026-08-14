@@ -13,6 +13,7 @@ Two independent things the web UI needs that aren't measurements:
 
 Dependency-free: standard library only.
 """
+
 import json
 import math
 import os
@@ -26,7 +27,7 @@ STATION_LON = 13.7261
 
 # CALLISTO writes one file per 15 minutes, continuously.
 FITS_SLOT_MINUTES = 15
-FITS_SLOTS_PER_DAY = 24 * 60 // FITS_SLOT_MINUTES     # 96
+FITS_SLOTS_PER_DAY = 24 * 60 // FITS_SLOT_MINUTES  # 96
 
 # How stale a stream may get before it counts as down. Generous multiples
 # of each stream's own cadence, so a single missed sample isn't an outage.
@@ -40,6 +41,7 @@ STALE_LIMITS = {
 # --------------------------------------------------------------------
 # Liveness
 # --------------------------------------------------------------------
+
 
 def stream_state(name, last_iso, now):
     """Classify a stream from how long ago it last delivered anything."""
@@ -84,12 +86,14 @@ def daily_coverage(day_counts, expected_per_day, days):
     for day in days:
         got = day_counts.get(day, 0)
         pct = min(100.0, 100.0 * got / expected_per_day) if expected_per_day else 0.0
-        out.append({
-            "date": day,
-            "count": got,
-            "expected": expected_per_day,
-            "coverage_pct": round(pct, 1),
-        })
+        out.append(
+            {
+                "date": day,
+                "count": got,
+                "expected": expected_per_day,
+                "coverage_pct": round(pct, 1),
+            }
+        )
     return out
 
 
@@ -126,19 +130,22 @@ def build_status(api_dir, weather, power, fits_index, now=None):
     """Write api/status/{latest,history}.json."""
     now = now or datetime.now(timezone.utc)
 
-    weather_days = count_by_day([r.get("timestamp") for r in weather if not r.get("gap")])
+    weather_days = count_by_day(
+        [r.get("timestamp") for r in weather if not r.get("gap")]
+    )
     power_days = count_by_day([r.get("timestamp") for r in power if not r.get("gap")])
 
     fits_days = {
-        day: len(files)
-        for day, files in (fits_index.get("days") or {}).items()
+        day: len(files) for day, files in (fits_index.get("days") or {}).items()
     }
 
     real_weather = [r for r in weather if not r.get("gap")]
     real_power = [r for r in power if not r.get("gap")]
 
     streams = [
-        stream_state("weather", real_weather[-1]["timestamp"] if real_weather else None, now),
+        stream_state(
+            "weather", real_weather[-1]["timestamp"] if real_weather else None, now
+        ),
         stream_state("power", real_power[-1]["timestamp"] if real_power else None, now),
         stream_state("fits", fits_last_seen(fits_index), now),
     ]
@@ -222,6 +229,7 @@ def fits_last_seen(fits_index):
 # Sun
 # --------------------------------------------------------------------
 
+
 def _solar_events(day, lat, lon):
     """Sunrise/solar noon/sunset for one date, in UTC hours.
 
@@ -235,7 +243,7 @@ def _solar_events(day, lat, lon):
     a = (14 - day.month) // 12
     y = day.year + 4800 - a
     m = day.month + 12 * a - 3
-    jdn = (day.day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045)
+    jdn = day.day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
 
     n = jdn - 2451545
 
@@ -246,16 +254,19 @@ def _solar_events(day, lat, lon):
     solar_mean_anomaly = (357.5291 + 0.98560028 * mean_solar_noon) % 360
     sma = math.radians(solar_mean_anomaly)
 
-    center = (1.9148 * math.sin(sma)
-              + 0.0200 * math.sin(2 * sma)
-              + 0.0003 * math.sin(3 * sma))
+    center = (
+        1.9148 * math.sin(sma) + 0.0200 * math.sin(2 * sma) + 0.0003 * math.sin(3 * sma)
+    )
 
     ecliptic_lon = (solar_mean_anomaly + center + 180 + 102.9372) % 360
     el = math.radians(ecliptic_lon)
 
-    solar_transit = (2451545.0 + mean_solar_noon
-                     + 0.0053 * math.sin(sma)      # equation of time,
-                     - 0.0069 * math.sin(2 * el))  # eccentricity + obliquity
+    solar_transit = (
+        2451545.0
+        + mean_solar_noon
+        + 0.0053 * math.sin(sma)  # equation of time,
+        - 0.0069 * math.sin(2 * el)
+    )  # eccentricity + obliquity
 
     declination = math.asin(math.sin(el) * math.sin(math.radians(23.4397)))
 
@@ -263,16 +274,18 @@ def _solar_events(day, lat, lon):
 
     def hour_angle(elevation_deg):
         cos_omega = (
-            (math.sin(math.radians(elevation_deg)) - math.sin(lat_r) * math.sin(declination))
-            / (math.cos(lat_r) * math.cos(declination))
-        )
+            math.sin(math.radians(elevation_deg))
+            - math.sin(lat_r) * math.sin(declination)
+        ) / (math.cos(lat_r) * math.cos(declination))
         if cos_omega > 1 or cos_omega < -1:
             return None
         return math.degrees(math.acos(cos_omega))
 
     def to_iso(julian):
         unix = (julian - 2440587.5) * 86400.0
-        return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.fromtimestamp(unix, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
 
     # -0.833 deg accounts for refraction and the sun's apparent radius.
     omega = hour_angle(-0.833)
@@ -333,11 +346,14 @@ def build_sun(api_dir, lat=STATION_LAT, lon=STATION_LON, now=None):
     }
 
     write_json(os.path.join(api_dir, "sun", "today.json"), payload)
-    write_json(os.path.join(api_dir, "sun", "year.json"), {
-        "generated": payload["generated"],
-        "year": today.year,
-        "days": year,
-    })
+    write_json(
+        os.path.join(api_dir, "sun", "year.json"),
+        {
+            "generated": payload["generated"],
+            "year": today.year,
+            "days": year,
+        },
+    )
     return payload
 
 
@@ -345,7 +361,9 @@ def build_sun(api_dir, lat=STATION_LAT, lon=STATION_LON, now=None):
 # Station log / blog
 # --------------------------------------------------------------------
 
-VERSION_HEADING = re.compile(r"^##\s*\[?([0-9]+\.[0-9]+\.[0-9]+)\]?\s*-\s*(\d{4}-\d{2}-\d{2})")
+VERSION_HEADING = re.compile(
+    r"^##\s*\[?([0-9]+\.[0-9]+\.[0-9]+)\]?\s*-\s*(\d{4}-\d{2}-\d{2})"
+)
 BULLET = re.compile(r"^[-*]\s+(.*)")
 
 
@@ -420,10 +438,13 @@ def build_blog(api_dir, changelog_path, station_posts_path):
     # Newest first; a date is all these have in common.
     posts.sort(key=lambda p: p.get("date", ""), reverse=True)
 
-    write_json(os.path.join(api_dir, "blog.json"), {
-        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "posts": posts,
-    })
+    write_json(
+        os.path.join(api_dir, "blog.json"),
+        {
+            "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "posts": posts,
+        },
+    )
     return len(posts)
 
 

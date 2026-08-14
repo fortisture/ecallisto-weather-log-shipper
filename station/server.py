@@ -21,6 +21,7 @@ Dependency-free: standard library only.
     python server.py --no-receiver        # serve only (no Pi ingest)
     python server.py --http-port 8080
 """
+
 import argparse
 import json
 import os
@@ -31,12 +32,13 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import api as generator          # noqa: E402
-import receiver                  # noqa: E402
-import status as station_status  # noqa: E402
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+import api as generator
+import receiver
+import status as station_status
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -60,6 +62,7 @@ def log(msg):
 # --------------------------------------------------------------------
 # FITS index
 # --------------------------------------------------------------------
+
 
 def iter_store_days(root):
     """Yield (date_key, "YYYY/MM/DD", absolute path) for a year/month/day store."""
@@ -99,12 +102,14 @@ def build_fits_index(fits_dir, api_dir):
             if not match:
                 continue
             hhmmss = match.group(2)
-            files.append({
-                "name": name,
-                "time": f"{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}",
-                "url": f"/fits/{url_path}/{name}",
-                "size": os.path.getsize(os.path.join(day_path, name)),
-            })
+            files.append(
+                {
+                    "name": name,
+                    "time": f"{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}",
+                    "url": f"/fits/{url_path}/{name}",
+                    "size": os.path.getsize(os.path.join(day_path, name)),
+                }
+            )
 
         if files:
             days[date_key] = files
@@ -118,11 +123,13 @@ def build_fits_index(fits_dir, api_dir):
         cursor = first
         while cursor <= last:
             key = cursor.isoformat()
-            calendar.append({
-                "date": key,
-                "available": key in days,
-                "count": len(days.get(key, [])),
-            })
+            calendar.append(
+                {
+                    "date": key,
+                    "available": key in days,
+                    "count": len(days.get(key, [])),
+                }
+            )
             cursor += timedelta(days=1)
 
     index = {
@@ -152,6 +159,7 @@ def build_fits_index(fits_dir, api_dir):
 # HTTP
 # --------------------------------------------------------------------
 
+
 class StationHandler(SimpleHTTPRequestHandler):
     """Serves the web UI, and maps /fits/... onto the local FITS store."""
 
@@ -165,9 +173,9 @@ class StationHandler(SimpleHTTPRequestHandler):
     # source tree.
     def _mapped_root(self, clean):
         if clean.startswith("/fits/"):
-            return self.fits_dir, clean[len("/fits/"):]
+            return self.fits_dir, clean[len("/fits/") :]
         if clean.startswith("/api/"):
-            return self.api_dir, clean[len("/api/"):]
+            return self.api_dir, clean[len("/api/") :]
         return None, None
 
     def translate_path(self, path):
@@ -197,7 +205,7 @@ class StationHandler(SimpleHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "   # the pages carry inline <script>
+            "script-src 'self' 'unsafe-inline'; "  # the pages carry inline <script>
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src https://fonts.gstatic.com; "
             "img-src 'self' data:; "
@@ -216,15 +224,96 @@ class StationHandler(SimpleHTTPRequestHandler):
         enumerates the whole store for anyone who asks.
         """
         self.send_error(404, "Not found")
-        return None
+
+    # A request that is not fully sent within this many seconds is dropped.
+    # Without it, a client can open a connection, dribble a partial request
+    # and never finish (a "slowloris"), holding a worker thread open
+    # indefinitely. BaseHTTPRequestHandler enforces this attribute itself.
+    # Kept short because every legitimate request here is a small GET that
+    # arrives in one packet -- there are no uploads to accommodate.
+    timeout = 10
 
     def log_message(self, fmt, *args):
         pass  # too chatty; the watcher already reports what matters
 
 
-def serve_http(host, port, fits_dir, api_dir):
+class BoundedHTTPServer(ThreadingHTTPServer):
+    """Threading HTTP server with two ceilings on concurrent connections.
+
+    ThreadingHTTPServer spawns one unbounded thread per connection, so a
+    flood of slow connections ("slowloris": open many, send bytes one at a
+    time, never finish) can exhaust threads and memory. Two limits contain
+    that:
+
+    - a global cap on total in-flight requests, bounding memory; and
+    - a per-IP cap, which is what actually defeats slowloris: a single
+      source can occupy only a handful of slots no matter how many
+      connections it opens, so it can never starve everyone else. Doing
+      that from many addresses at once requires a botnet -- a different
+      threat, and the one the reverse proxy in DEPLOYMENT.md exists for.
+
+    Combined with the handler's own request-read timeout, a stalled
+    connection both holds at most one of its source's few slots and is
+    dropped after a few seconds.
+    """
+
+    daemon_threads = True
+
+    def __init__(self, *args, max_workers=64, per_ip=8, **kwargs):
+        self._slots = threading.BoundedSemaphore(max_workers)
+        self._per_ip_limit = per_ip
+        self._per_ip = {}
+        self._per_ip_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def _ip_acquire(self, ip):
+        with self._per_ip_lock:
+            if self._per_ip.get(ip, 0) >= self._per_ip_limit:
+                return False
+            self._per_ip[ip] = self._per_ip.get(ip, 0) + 1
+            return True
+
+    def _ip_release(self, ip):
+        with self._per_ip_lock:
+            n = self._per_ip.get(ip, 0) - 1
+            if n <= 0:
+                self._per_ip.pop(ip, None)
+            else:
+                self._per_ip[ip] = n
+
+    def process_request(self, request, client_address):
+        ip = client_address[0]
+
+        if not self._ip_acquire(ip):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+
+        if not self._slots.acquire(timeout=5):
+            self._ip_release(ip)
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+            self._ip_release(client_address[0])
+
+
+def serve_http(host, port, fits_dir, api_dir, max_workers=64, per_ip=8):
     handler = partial(StationHandler, fits_dir=fits_dir, api_dir=api_dir)
-    httpd = ThreadingHTTPServer((host, port), handler)
+    httpd = BoundedHTTPServer(
+        (host, port), handler, max_workers=max_workers, per_ip=per_ip
+    )
     log(f"web UI on http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}/")
     httpd.serve_forever()
 
@@ -233,7 +322,10 @@ def serve_http(host, port, fits_dir, api_dir):
 # Watcher
 # --------------------------------------------------------------------
 
-def watch_and_generate(generator, weather_dir, power_dir, api_dir, fits_dir, interval, failsafe_hours):
+
+def watch_and_generate(
+    generator, weather_dir, power_dir, api_dir, fits_dir, interval, failsafe_hours
+):
     """Rebuild derived files when the stores change.
 
     Normally this is change-driven: nothing changed, nothing is rebuilt.
@@ -253,20 +345,28 @@ def watch_and_generate(generator, weather_dir, power_dir, api_dir, fits_dir, int
         try:
             forced = next_failsafe is not None and time.time() >= next_failsafe
             if forced:
-                log(f"failsafe sweep ({failsafe_hours:g}h): rebuilding everything from disk")
+                log(
+                    f"failsafe sweep ({failsafe_hours:g}h): rebuilding everything from disk"
+                )
                 next_failsafe = time.time() + failsafe_hours * 3600
 
-            missing = not os.path.exists(os.path.join(api_dir, "weather", "history.json"))
+            missing = not os.path.exists(
+                os.path.join(api_dir, "weather", "history.json")
+            )
 
             digest = generator.hash_dir(weather_dir)
             if forced or missing or digest != last_weather:
-                total, emitted = generator.generate(weather_dir, os.path.join(api_dir, "weather"), 0)
+                total, emitted = generator.generate(
+                    weather_dir, os.path.join(api_dir, "weather"), 0
+                )
                 log(f"weather API rebuilt: {total} readings")
                 last_weather = digest
 
             power_digest = generator.hash_dir(power_dir)
             if forced or power_digest != last_power:
-                count = generator.generate_power(power_dir, os.path.join(api_dir, "power"))
+                count = generator.generate_power(
+                    power_dir, os.path.join(api_dir, "power")
+                )
                 log(f"power API rebuilt: {count} readings")
                 last_power = power_digest
 
@@ -353,14 +453,17 @@ def fits_fingerprint(fits_dir):
 # Main
 # --------------------------------------------------------------------
 
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument(
         "--http-host",
         default="0.0.0.0",
         help="0.0.0.0 exposes the UI on the LAN. Set 127.0.0.1 when a "
-             "reverse proxy (Caddy/nginx/cloudflared) terminates HTTPS in "
-             "front of it, so the plain-HTTP port is not reachable directly.",
+        "reverse proxy (Caddy/nginx/cloudflared) terminates HTTPS in "
+        "front of it, so the plain-HTTP port is not reachable directly.",
     )
     ap.add_argument("--http-port", type=int, default=8090)
     ap.add_argument("--weather-dir", default=DEFAULT_WEATHER_DIR)
@@ -370,31 +473,45 @@ def main():
         "--api-dir",
         default=DEFAULT_API_DIR,
         help="where generated JSON is written. Served at /api/, so it does "
-             "not need to sit inside the web directory.",
+        "not need to sit inside the web directory.",
     )
     ap.add_argument(
         "--poll-interval",
         type=float,
         default=5.0,
         help="seconds between change checks. Weather arrives every few "
-             "minutes and spectrograms every fifteen, so polling faster "
-             "than this only costs CPU -- the scan is proportional to the "
-             "number of files in the store, which grows forever.",
+        "minutes and spectrograms every fifteen, so polling faster "
+        "than this only costs CPU -- the scan is proportional to the "
+        "number of files in the store, which grows forever.",
     )
     ap.add_argument(
         "--failsafe-hours",
         type=float,
         default=6.0,
         help="rebuild everything from disk on this interval regardless of "
-             "change detection, so a crash or deleted file self-heals (0 disables)",
+        "change detection, so a crash or deleted file self-heals (0 disables)",
     )
 
-    ap.add_argument("--no-receiver", action="store_true", help="serve only; don't accept Pi uploads")
+    ap.add_argument(
+        "--no-receiver", action="store_true", help="serve only; don't accept Pi uploads"
+    )
     ap.add_argument("--receiver-host", default="0.0.0.0")
     ap.add_argument("--receiver-port", type=int, default=9443)
     ap.add_argument("--cert", default=os.path.join(ROOT, "secrets", "cert.pem"))
     ap.add_argument("--key", default=os.path.join(ROOT, "secrets", "key.pem"))
     ap.add_argument("--token-file", default=os.path.join(ROOT, "secrets", "token.txt"))
+    ap.add_argument(
+        "--max-connections",
+        type=int,
+        default=16,
+        help="concurrent Pi-receiver connection cap (one sender needs one)",
+    )
+    ap.add_argument(
+        "--max-workers",
+        type=int,
+        default=64,
+        help="concurrent HTTP worker cap, to bound a slow-client flood",
+    )
     args = ap.parse_args()
 
     weather_dir = os.path.abspath(args.weather_dir)
@@ -413,11 +530,15 @@ def main():
     log(f"generated API: {api_dir}")
 
     if not args.no_receiver:
-        missing = [p for p in (args.cert, args.key, args.token_file) if not os.path.exists(p)]
+        missing = [
+            p for p in (args.cert, args.key, args.token_file) if not os.path.exists(p)
+        ]
         if missing:
-            log("receiver disabled -- missing " + ", ".join(os.path.basename(m) for m in missing))
-            log("run  python install.py secrets  to create them, "
-                "or pass --no-receiver")
+            log(
+                "receiver disabled -- missing "
+                + ", ".join(os.path.basename(m) for m in missing)
+            )
+            log("run  python install.py secrets  to create them, or pass --no-receiver")
         else:
             thread = threading.Thread(
                 target=run_receiver,
@@ -428,8 +549,15 @@ def main():
 
     watcher = threading.Thread(
         target=watch_and_generate,
-        args=(generator, weather_dir, power_dir, api_dir, fits_dir,
-              args.poll_interval, args.failsafe_hours),
+        args=(
+            generator,
+            weather_dir,
+            power_dir,
+            api_dir,
+            fits_dir,
+            args.poll_interval,
+            args.failsafe_hours,
+        ),
         daemon=True,
     )
     watcher.start()
@@ -438,44 +566,39 @@ def main():
         log(f"failsafe sweep every {args.failsafe_hours:g}h")
 
     try:
-        serve_http(args.http_host, args.http_port, fits_dir, api_dir)
+        serve_http(args.http_host, args.http_port, fits_dir, api_dir, args.max_workers)
     except KeyboardInterrupt:
         log("shutting down")
 
 
 def run_receiver(receiver, args, weather_dir, power_dir):
-    """Drive receiver.py's connection handler on our own socket."""
-    import socket
-    import ssl
+    """Run the Pi receiver via its own hardened serve loop.
 
+    receiver.serve owns the connection cap, the per-connection timeouts and
+    the accept loop, so this does not re-implement any of it -- it only
+    supplies the paths and secret. Keeping one accept loop means the
+    denial-of-service protections cannot drift apart between the two entry
+    points.
+    """
     with open(args.token_file) as f:
         token = f.read().strip()
 
-    cfg = {"token": token, "outdir": weather_dir,
-           "blobdir": args.fits_dir, "powerdir": power_dir}
+    cfg = {
+        "token": token,
+        "outdir": weather_dir,
+        "blobdir": args.fits_dir,
+        "powerdir": power_dir,
+    }
 
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(certfile=args.cert, keyfile=args.key)
-
-    lock = threading.Lock()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((args.receiver_host, args.receiver_port))
-    sock.listen(5)
     log(f"Pi receiver listening on {args.receiver_host}:{args.receiver_port} (TLS)")
-
-    while True:
-        try:
-            raw_conn, addr = sock.accept()
-        except OSError as e:
-            log(f"receiver accept failed: {e}")
-            continue
-
-        threading.Thread(
-            target=receiver.handle_client,
-            args=(raw_conn, addr, cfg, ctx, lock),
-            daemon=True,
-        ).start()
+    receiver.serve(
+        args.receiver_host,
+        args.receiver_port,
+        args.cert,
+        args.key,
+        cfg,
+        args.max_connections,
+    )
 
 
 if __name__ == "__main__":
