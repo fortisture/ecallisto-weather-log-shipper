@@ -401,7 +401,13 @@ def parse_changelog(path, limit=12):
 
 
 def build_blog(api_dir, changelog_path, station_posts_path):
-    """Merge the station journal with the site changelog into one feed."""
+    """Publish the station log.
+
+    Posts are written by hand in web/blog/posts.json -- they are prose,
+    not release notes. CHANGELOG.md is still the machine-readable record
+    of every version, but it is not rendered here: a reader wants two
+    articles about how the system works, not eleven version bumps.
+    """
     posts = []
 
     if os.path.exists(station_posts_path):
@@ -410,8 +416,6 @@ def build_blog(api_dir, changelog_path, station_posts_path):
                 posts.extend(json.load(f).get("posts", []))
         except (OSError, ValueError):
             pass
-
-    posts.extend(parse_changelog(changelog_path))
 
     # Newest first; a date is all these have in common.
     posts.sort(key=lambda p: p.get("date", ""), reverse=True)

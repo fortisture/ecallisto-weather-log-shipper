@@ -56,21 +56,22 @@
       </div>
 
       <div class="explain-body">
-        Two kinds of entry share this timeline. <strong>Instrument</strong>
-        entries are quoted from the
+        Notes on running the station. <strong>Instrument</strong> posts cover
+        the hardware — antennas, amplifiers, the receiver coming back on-line
+        — and cite the
         <a href="https://www.e-callisto.org/Journal.html" rel="noopener noreferrer"
-           target="_blank">e-Callisto network journal</a> and record work on the
-        hardware itself — antennas, connectors, the receiver coming back
-        on-line. <strong>Software</strong> entries are this project's own
-        releases, read straight out of <code>CHANGELOG.md</code> so they
-        appear here the moment they are committed rather than being retyped.
+           target="_blank">e-Callisto network journal</a> where the network
+        recorded them. <strong>Software</strong> posts explain how the
+        monitoring works, and <strong>the project</strong> is about how the
+        work gets done and why.
       </div>
 
       <div class="blog-body">
         <div class="blog-filter" id="blog-filter">
           <button type="button" class="range-btn is-active" data-kind="all">ALL</button>
           <button type="button" class="range-btn" data-kind="station">INSTRUMENT</button>
-          <button type="button" class="range-btn" data-kind="site">SOFTWARE</button>
+          <button type="button" class="range-btn" data-kind="software">SOFTWARE</button>
+          <button type="button" class="range-btn" data-kind="story">THE PROJECT</button>
         </div>
 
         <ol class="blog-list" id="blog-list"></ol>
@@ -106,37 +107,71 @@
     }
 
     list.innerHTML = shown.map(post => {
-      const points = (post.points || []).length
-        ? "<ul>" + post.points.map(pt => "<li>" + escapeHtml(pt) + "</li>").join("") + "</ul>"
-        : "";
+      /* body is an array of paragraphs; older entries may carry a single
+       * string, so accept both rather than breaking on old data. */
+      const paras = Array.isArray(post.body) ? post.body
+                  : (post.body ? [post.body] : []);
 
       const quote = post.quote
         ? '<blockquote>' + escapeHtml(post.quote) +
           (post.source
-            ? '<cite>' +
+            ? "<cite>" +
                 (post.source_url
-                  ? '<a href="' + post.source_url + '" rel="noopener noreferrer" target="_blank">' +
-                    escapeHtml(post.source) + "</a>"
+                  ? '<a href="' + post.source_url + '" rel="noopener noreferrer" ' +
+                    'target="_blank">' + escapeHtml(post.source) + "</a>"
                   : escapeHtml(post.source)) +
               "</cite>"
             : "") +
           "</blockquote>"
         : "";
 
-      return '<li class="blog-post is-' + (post.kind || "site") + '">' +
-        '<div class="bp-meta">' +
-          '<time>' + post.date + "</time>" +
-          '<span class="bp-kind">' +
-            (post.kind === "station" ? "INSTRUMENT" : "SOFTWARE") +
-          "</span>" +
-        "</div>" +
+      const sourceLine = (!post.quote && post.source)
+        ? '<p class="bp-source">Source: ' +
+            (post.source_url
+              ? '<a href="' + post.source_url + '" rel="noopener noreferrer" ' +
+                'target="_blank">' + escapeHtml(post.source) + "</a>"
+              : escapeHtml(post.source)) +
+          "</p>"
+        : "";
+
+      const tags = (post.tags || []).length
+        ? '<div class="bp-tags">' +
+            post.tags.map(t => '<span class="bp-tag">' + escapeHtml(t) + "</span>").join("") +
+          "</div>"
+        : "";
+
+      return '<li><article class="blog-post is-' + (post.kind || "station") + '">' +
+        '<header class="bp-head">' +
+          '<span class="bp-kind">' + KIND_LABEL[post.kind] + "</span>" +
+          "<h2>" + escapeHtml(post.title || "") + "</h2>" +
+          '<div class="bp-byline">' +
+            "<time datetime=\"" + post.date + '">' + formatDate(post.date) + "</time>" +
+          "</div>" +
+          (post.summary ? '<p class="bp-summary">' + escapeHtml(post.summary) + "</p>" : "") +
+        "</header>" +
         '<div class="bp-body">' +
-          "<h4>" + escapeHtml(post.title || "") + "</h4>" +
-          (post.body ? "<p>" + escapeHtml(post.body) + "</p>" : "") +
-          points + quote +
+          paras.map(t => "<p>" + escapeHtml(t) + "</p>").join("") +
+          quote + sourceLine + tags +
         "</div>" +
-      "</li>";
+      "</article></li>";
     }).join("");
+  }
+
+
+  const KIND_LABEL = {
+    station: "Instrument",
+    software: "Software",
+    story: "The project"
+  };
+
+
+  const MONTHS = ["January","February","March","April","May","June",
+                  "July","August","September","October","November","December"];
+
+  function formatDate(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    return Number(d) + " " + MONTHS[Number(m) - 1] + " " + y;
   }
 
 

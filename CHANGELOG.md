@@ -5,6 +5,26 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.2.0] - 2026-08-14
+
+### Changed
+- **The Station Log is now written prose, not parsed release notes.** Ten
+  posts, each with a summary and body: seven about the instrument, sourced
+  from the e-Callisto network journal and status report #101; two about the
+  software, compressing every version into one article on the backend and
+  one on the frontend; and one on why students build the instruments.
+  `CHANGELOG.md` remains the machine-readable version record but is no
+  longer rendered as blog content.
+- **About is now about the station**, not the observatory's wider history —
+  what the instrument is, what it records, and why a network of them
+  exists. The three people cards were levelled to a similar length.
+
+### Fixed
+- A bare `header { display: flex }` selector matched every `<header>` in
+  the document, including the ones inside log articles, which laid post
+  titles, dates and summaries out as overlapping flex columns. Scoped to
+  `.wrap > header`.
+
 ## [4.1.0] - 2026-08-14
 
 ### Added

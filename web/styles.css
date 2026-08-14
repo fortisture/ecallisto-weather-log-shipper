@@ -95,7 +95,10 @@ body {
 
 /* ---------- Header ---------- */
 
-header {
+/* Scoped to the page banner. A bare `header` selector also matches every
+ * <header> inside an article, which silently turned the station log's
+ * post headers into flex rows. */
+.wrap > header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
@@ -1071,7 +1074,7 @@ footer.page-footer {
 }
 
 @media (max-width: 560px) {
-  header {
+  .wrap > header {
     flex-direction: column;
 
     align-items: flex-start;
@@ -1741,55 +1744,47 @@ button:disabled,
 .people-note a { color: var(--signal); text-decoration: none; }
 .people-note a:hover { text-decoration: underline; }
 
-/* ---- station log / blog ---- */
+/* ---- station log: readable articles ---- */
 
-.blog-body { padding: 18px 20px 22px; }
+.blog-body { padding: 20px 24px 26px; }
 
 .blog-filter {
   display: flex;
-  gap: 0;
-
   border: 1px solid var(--line);
   width: max-content;
-
-  margin-bottom: 18px;
+  margin-bottom: 26px;
   overflow: hidden;
+  flex-wrap: wrap;
 }
 
 .blog-list {
   list-style: none;
   margin: 0;
   padding: 0;
+
+  /* Prose wants a measure, not the full panel width. */
+  max-width: 68ch;
 }
 
 .blog-post {
-  display: grid;
-  grid-template-columns: 150px 1fr;
-  gap: 20px;
-
-  padding: 18px 0;
+  padding: 30px 0;
   border-top: 1px solid var(--line-faint);
 }
 
-.blog-post:first-child { border-top: 0; padding-top: 4px; }
-
-.bp-meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.bp-meta time {
-  display: block;
-  color: var(--text);
-  margin-bottom: 5px;
+.blog-list > li:first-child .blog-post {
+  border-top: 0;
+  padding-top: 4px;
 }
 
 .bp-kind {
   display: inline-block;
-  padding: 2px 7px;
+  padding: 3px 9px;
+  margin-bottom: 12px;
 
+  font-family: var(--font-mono);
   font-size: 9px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 
   border: 1px solid var(--line);
   color: var(--text-faint);
@@ -1800,50 +1795,65 @@ button:disabled,
   color: var(--signal);
 }
 
-.bp-body h4 {
-  margin: 0 0 7px;
+.blog-post.is-story .bp-kind {
+  border-color: #6B5A2E;
+  color: var(--warn);
+}
+
+.bp-head {
+  display: block;
+}
+
+.bp-head h2 {
+  margin: 0 0 8px;
 
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 19px;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--text);
 }
 
-.bp-body p {
-  margin: 0 0 10px;
-  font-size: 13px;
-  line-height: 1.75;
-  color: var(--text-dim);
+.bp-byline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 12px;
 }
 
-.bp-body ul {
-  margin: 0 0 10px;
-  padding-left: 18px;
-}
+.bp-summary {
+  margin: 0 0 18px;
 
-.bp-body li {
-  font-size: 12.5px;
+  font-size: 14.5px;
   line-height: 1.7;
   color: var(--text-dim);
-  margin-bottom: 3px;
+  font-style: italic;
+}
+
+.bp-body p {
+  margin: 0 0 16px;
+
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--text-dim);
 }
 
 .bp-body blockquote {
-  margin: 0;
-  padding: 10px 14px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
 
   border-left: 2px solid var(--signal-dim);
   background: var(--panel-raised);
 
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.65;
   color: var(--text-dim);
 }
 
 .bp-body blockquote cite {
   display: block;
-  margin-top: 6px;
+  margin-top: 8px;
 
   font-style: normal;
   font-size: 10px;
@@ -1851,6 +1861,33 @@ button:disabled,
 }
 
 .bp-body blockquote cite a { color: var(--text-faint); }
+
+.bp-source {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.bp-source a { color: var(--signal); text-decoration: none; }
+.bp-source a:hover { text-decoration: underline; }
+
+.bp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+.bp-tag {
+  padding: 3px 9px;
+
+  font-family: var(--font-mono);
+  font-size: 10px;
+
+  background: var(--panel-raised);
+  border: 1px solid var(--line-faint);
+  color: var(--text-faint);
+}
 
 .blog-empty {
   font-size: 13px;

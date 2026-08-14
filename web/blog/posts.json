@@ -1,51 +1,180 @@
 {
-  "_comment": "Station log. 'station' entries are quoted from the e-Callisto network journal at https://www.e-callisto.org/Journal.html and describe the instrument itself. 'site' entries are changes to this monitoring software. Add new entries at the top.",
+  "_comment": "Station log. 'station' posts describe the instrument and are sourced from the e-Callisto network journal and status reports. 'software' posts describe this monitoring system. 'story' posts are about the project and the people. Newest first; the server sorts by date anyway.",
 
   "posts": [
     {
+      "date": "2026-08-14",
+      "kind": "software",
+      "title": "How the data gets here: the backend",
+      "summary": "A Raspberry Pi at the telescope, a server somewhere else, and a stubborn refusal to lose a single row.",
+      "body": [
+        "The instrument writes three kinds of file: weather readings every few minutes, power-rail telemetry, and one CALLISTO spectrogram every fifteen minutes. All of it lands on the Pi's SD card — which is exactly the wrong place for it to stay. SD cards wear out, and a card holding two years of observations is a single point of failure with a countdown on it.",
+
+        "So a small program on the Pi watches those files and ships every change to a server. The interesting part is how it decides what changed. Checking the file size is the obvious approach and it is wrong: if someone corrects a row that is already written, the size may not change at all, and the server would keep a stale copy forever without either machine noticing. Instead the sender hashes the file and compares it against a hash of exactly what it has already sent. If the file still begins with what was sent, only the tail is new — ship those rows. If it does not, something was edited underneath us, so ship the whole file and let the server replace its copy.",
+
+        "The sender records how far it has got after every single row, not after each batch. That one detail is what makes a power cut harmless: on restart it knows precisely where it stopped, so nothing is sent twice and nothing is skipped.",
+
+        "Spectrograms travel the same road but are simpler — a FITS file is written once and never touched again, so it is sent whole. They arrive over the same authenticated connection as everything else, which means the server ends up holding every kind of data the station produces rather than just the convenient text parts.",
+
+        "Because the Pi and the server sit on different networks, and the only port open on the server is SSH, the Pi does not connect to a data port across the internet at all. It opens an SSH tunnel and speaks to a receiver that is bound to localhost. Nothing but sshd listens on a public interface. The encryption, certificate pinning and shared token all stay in place inside that tunnel — SSH proves which machine connected, and the inner layer proves the sender is talking to the right receiver rather than something that has quietly taken its place.",
+
+        "Then there is the failure nobody plans for: the server is rebuilt, or restored from a backup, and quietly loses files. The Pi has no way to detect that — its records still say everything was delivered. So every six hours it simply forgets what it believes it has sent and sends it again. That sounds wasteful, and it is, slightly. It is also the reason the system heals itself without anyone being paged at two in the morning.",
+
+        "Finally, none of this needs anything installed. Both programs use only what comes with Python. No packages to update, nothing to break when the operating system moves on. In five years someone should be able to read the whole thing and understand it."
+      ],
+      "tags": ["Raspberry Pi", "SSH", "reliability"]
+    },
+
+    {
+      "date": "2026-08-14",
+      "kind": "software",
+      "title": "Showing it honestly: the frontend",
+      "summary": "Eight pages, no framework, and a set of rules about not lying with charts.",
+      "body": [
+        "The site has one job: let you tell at a glance whether the station is healthy, and dig in when it is not. There is no framework behind it — the pages are plain HTML and one shared script. That is a deliberate choice rather than nostalgia. A build step is one more thing that can rot, and a student picking this up in three years should be able to open a file and read it.",
+
+        "Most of the effort went into not misleading anyone. Charts break their line across an outage instead of drawing a straight, confident stroke through the hours when nothing was recorded — if the station was down, the chart says so. Every reading carries both UTC and local time, because the instrument thinks in UTC and the people reading think in CEST, and quietly picking one is how mistakes happen. Numbers that were computed rather than measured, like power in watts, are derived on the spot from the two values behind them so they can never drift out of agreement.",
+
+        "The colours were measured, not chosen by eye. Series colours were run through a colour-blindness checker for separation, and every text colour against its background for contrast — which is how we found two greys that had been failing the readability threshold all along. They were invisible on a good monitor in a dark room and quite visible on a laptop outdoors. Both were relit to pass without changing the look.",
+
+        "The spectrogram viewer decodes real CALLISTO files in the browser: unzip, parse the FITS header, read the frequency table, draw two hundred channels onto a canvas. It offers the same background-subtraction the network's own processing uses, so what you see lines up with the published product. It also taught us a lesson about confidence — for a while the images were upside down, and because the axis labels were generated separately and were perfectly correct, nothing looked wrong. A plot can be mislabelled and still look plausible, which is worse than a plot that is obviously broken.",
+
+        "The overview page opens with the sun's position today, drawn as an arc from sunrise to sunset with the sun sitting where it currently is. Those times are computed on the server from the observatory's coordinates rather than fetched from a weather service, so the station knows when the sun rises even with no internet at all.",
+
+        "Everything the pages read is a plain JSON file written by the server. Long time ranges are averaged down before they are sent, so opening the site stays fast whether the archive holds a month or a decade."
+      ],
+      "tags": ["web", "charts", "accessibility"]
+    },
+
+    {
+      "date": "2026-08-14",
+      "kind": "story",
+      "title": "Why students build the instruments",
+      "summary": "Višnjan's method, and what it means to hand a teenager a real receiver.",
+      "body": [
+        "Višnjan is a small hilltop village in inland Istria, and an unlikely place to find one of Europe's more productive small observatories. It began in the late 1970s, when Korado Korlević and a few other teachers from the local school founded an amateur astronomy society. In November 1992 that society opened a public observatory, which went on to hold the IAU/MPC observatory code 120 and to discover well over a thousand minor planets. As coastal lighting grew, the observatory moved to darker skies at Tićan, where it works today.",
+
+        "The thread running through all of it is teaching, on a principle that sounds simple and is not: students are not shown science, they do science — with real instruments, producing data that goes into real archives.",
+
+        "The difference matters more than it first appears. A demonstration has a known answer, and everyone in the room can tell when it has gone wrong. Real observation does not work like that. The antenna connector corrodes. A neighbour installs something that floods the band with interference. The receiver runs for six weeks and then stops for a reason nobody anticipated. None of that is in a textbook, and all of it is the actual work.",
+
+        "That is why the radio station was built the way it was, rather than bought as a finished box. The receiver had to be assembled and adapted. The antenna needed a connector shield designed and printed because the weather was getting into it. An amplifier concept had to be worked out over a winter. Every one of those was a genuine problem with no answer at the back of the book, solved by students with mentors beside them rather than in front of them.",
+
+        "The monitoring you are reading now came from the same place. Nobody set out to build a website. Someone wanted to know whether the instrument was still recording without walking down to it, and whether the dew heater was doing anything useful — and answering that properly turned out to mean shipping data across a network, storing it safely, and drawing it honestly. Which is, more or less, the entire job of an observatory in miniature.",
+
+        "The data goes to the e-Callisto archive alongside every other station's, where the team at ETH Zurich screens and classifies it for research use. It is not a practice archive. That is the point."
+      ],
+      "tags": ["Višnjan School of Astronomy", "method"]
+    },
+
+    {
       "date": "2025-08-22",
       "kind": "station",
-      "title": "New log-periodic antenna and rotator gearing",
-      "body": "A new LPDA went up, together with a 3D-printed shroud protecting the feedpoint connector from weather. The rotator's encoder and gear assembly were rebuilt at the same time.",
+      "title": "New antenna, and a printed shield for the connector",
+      "summary": "A new log-periodic array went up, with a 3D-printed shroud protecting the feedpoint, and the rotator gearing rebuilt.",
+      "body": [
+        "The station received a new LPDA — a log-periodic dipole array, the fan-shaped antenna that gives a CALLISTO station its wide frequency coverage.",
+
+        "The more interesting detail is the 3D-printed connector protection installed with it. The feedpoint connector is where the antenna meets the cable, it sits outdoors permanently, and water getting into it degrades the signal long before anything obviously fails. A printed shroud is exactly the kind of fix that is invisible in the data when it works.",
+
+        "The rotator's encoder and gear assembly were rebuilt at the same time."
+      ],
       "quote": "Croatia new LPDA incl. 3D-printed connector-protection. New encoder/gear construction",
-      "source": "e-Callisto network journal",
-      "source_url": "https://www.e-callisto.org/Journal.html"
+      "source": "e-Callisto network journal, 2025-08-22",
+      "source_url": "https://www.e-callisto.org/Journal.html",
+      "tags": ["antenna", "hardware"]
     },
+
+    {
+      "date": "2025-01-25",
+      "kind": "station",
+      "title": "Višnjan gets its own station report",
+      "summary": "The network published a dedicated status report on the station, alongside the year's burst statistics.",
+      "body": [
+        "e-Callisto status report #101 — \"Station report Visnjan, Croatia and 2025 burst-bar-chart\" — was published by C. Monstein, who has authored all 103 reports in the series going back to 2003.",
+
+        "Getting a dedicated station report is a small milestone. It means the station is producing data worth writing about rather than merely existing on the list."
+      ],
+      "source": "e-Callisto status report #101",
+      "source_url": "https://www.e-callisto.org/statusreports/statusreports.html",
+      "tags": ["milestone"]
+    },
+
     {
       "date": "2025-01-05",
       "kind": "station",
       "title": "Back on-line, and quiet",
-      "body": "The station returned to service after a break, and — the part that matters for a radio site — with low interference. Clean spectra depend far more on the local RFI environment than on the receiver itself.",
+      "summary": "The station returned to service with good results and — the part that matters for a radio site — low interference.",
+      "body": [
+        "For a radio station, \"low RFI\" is higher praise than it sounds. Clean spectra depend far more on the local interference environment than on the quality of the receiver: a perfect instrument in a noisy location produces unusable data, and a modest one somewhere quiet produces something worth archiving.",
+
+        "Višnjan sits well for this. Being on a hill in a rural part of Istria is an advantage that no amount of money can buy back once it is lost."
+      ],
       "quote": "Croatia Visnjan back on-line with nice results and low rfi",
-      "source": "e-Callisto network journal",
-      "source_url": "https://www.e-callisto.org/Journal.html"
+      "source": "e-Callisto network journal, 2025-01-05",
+      "source_url": "https://www.e-callisto.org/Journal.html",
+      "tags": ["RFI"]
     },
+
+    {
+      "date": "2024-12-31",
+      "kind": "station",
+      "title": "Working out the amplifier",
+      "summary": "The station began developing its own low-noise amplifier concept.",
+      "body": [
+        "The LNA is the first thing the signal meets after the antenna, and it sets the noise floor for everything downstream — no amount of processing later recovers what it loses. Developing one rather than fitting a stock part is the kind of work that pays off in every observation afterwards.",
+
+        "The e-Callisto journal noted the effort at the end of 2024, in the same entry as issues at stations in India, Uruguay and Alaska. Roughly eighty of the network's 250-odd instruments were delivering regular data around that time."
+      ],
+      "source": "e-Callisto network journal, 2024-12-31",
+      "source_url": "https://www.e-callisto.org/Journal.html",
+      "tags": ["LNA", "hardware"]
+    },
+
     {
       "date": "2024-08-11",
       "kind": "station",
       "title": "First light",
-      "body": "At 07:41 UT the station recorded its first real solar observation. This is the date the archive counts from, and every spectrogram on this site is measured against it.",
+      "summary": "At 07:41 UT the station recorded its first real solar observation.",
+      "body": [
+        "\"First light\" is the moment an instrument observes its target properly for the first time, and it is the date an observatory counts from ever afterwards. For Croatia-Višnjan that was 07:41 UT on 11 August 2024.",
+
+        "Every spectrogram in this archive is measured from that morning, and the counter on the About page counts the days since."
+      ],
       "quote": "Croatia-Visnjan 1st light at 07:41",
-      "source": "e-Callisto network journal",
-      "source_url": "https://www.e-callisto.org/Journal.html"
+      "source": "e-Callisto network journal, 2024-08-11",
+      "source_url": "https://www.e-callisto.org/Journal.html",
+      "tags": ["milestone", "first light"]
     },
+
     {
       "date": "2024-04-05",
       "kind": "station",
       "title": "Continuous upload begins",
-      "body": "The station moved from occasional test files to uploading continuously, which is what makes a station useful to the network: the value of e-Callisto is that some station somewhere is always watching.",
+      "summary": "The station moved from occasional test files to uploading without interruption.",
+      "body": [
+        "This is the step that makes a station genuinely useful to the network. e-Callisto's value is not any single instrument but the fact that with more than eighty stations spread across every longitude, some part of the network is always in daylight — the Sun is never unobserved.",
+
+        "A station that uploads sometimes contributes almost nothing to that. A station that uploads continuously fills a slice of the day, permanently."
+      ],
       "quote": "Croatia-Visnjan starting with continous files upload",
-      "source": "e-Callisto network journal",
-      "source_url": "https://www.e-callisto.org/Journal.html"
+      "source": "e-Callisto network journal, 2024-04-05",
+      "source_url": "https://www.e-callisto.org/Journal.html",
+      "tags": ["operations"]
     },
+
     {
       "date": "2024-04-04",
       "kind": "station",
       "title": "First files reach the archive",
-      "body": "The first data from Croatia-Visnjan arrived at the central archive — the point at which the station existed as far as the rest of the network was concerned.",
+      "summary": "The first data from Croatia-Višnjan arrived at the central archive.",
+      "body": [
+        "This is the point at which the station began to exist as far as the rest of the network was concerned — four months before first light, and the result of a great deal of work that leaves no trace in any archive."
+      ],
       "quote": "First files from Croatia-Visnjan",
-      "source": "e-Callisto network journal",
-      "source_url": "https://www.e-callisto.org/Journal.html"
+      "source": "e-Callisto network journal, 2024-04-04",
+      "source_url": "https://www.e-callisto.org/Journal.html",
+      "tags": ["milestone"]
     }
   ]
 }
