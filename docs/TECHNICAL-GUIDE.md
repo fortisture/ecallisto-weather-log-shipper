@@ -756,6 +756,17 @@ visual break rather than a line drawn straight through them.
 
 ---
 
+### Where the generated files live
+
+Everything the server derives is written to `data/api/`, beside the stores
+it derives them from — not into `web/`. The URL `/api/...` is mapped onto
+that directory exactly as `/fits/...` is mapped onto the spectrogram store.
+
+The reason is simple: `web/` should contain only files a person wrote. When
+generated JSON sat inside it, the directory was half source and half build
+output, and `.gitignore` needed a rule to carve one out of the other. Now
+`web/` is committed in full and `data/` is ignored in full.
+
 ### Why the API is split by range
 
 Originally the browser downloaded the entire archive on every page load
@@ -768,10 +779,10 @@ down to about 1200 points, which is as many as a chart a thousand pixels
 wide can distinguish anyway:
 
 ```
-web/api/weather/history-24h.json      4.3 KB
-web/api/weather/history-7d.json      28   KB
-web/api/weather/history-30d.json    113   KB
-web/api/weather/history-all.json    141   KB
+data/api/weather/history-24h.json     4.3 KB
+data/api/weather/history-7d.json     28   KB
+data/api/weather/history-30d.json   113   KB
+data/api/weather/history-all.json   141   KB
 ```
 
 Switching range now fetches a different small file instead of re-slicing a
@@ -1237,18 +1248,18 @@ down, which is something you want to see rather than have hidden.
 - **`pi/setup_pi.sh`** — installs the sender on the Pi as a *service*, so it
   starts automatically at boot and restarts if it crashes.
 
-- **`deploy/install_receiver.ps1`** — generates the certificate and token,
-  opens the firewall port, registers the receiver to start at login.
+- **`install.py`** — the one installer, for both machines. `server`
+  prepares the receiving box, `pi` prepares the Raspberry Pi, `secrets`
+  generates the certificate and token, and `check` verifies an existing
+  installation. Every privileged command is printed before it runs.
 
----
 
 ## 13. Operation
 
 **On the PC (once):**
 
-```powershell
-cd windows
-.\install_and_run.ps1
+```bash
+python install.py secrets
 ```
 
 Generates the certificate and token and prints the fingerprint. Copy the

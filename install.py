@@ -164,7 +164,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths={root}/data {root}/web/api
+ReadWritePaths={root}/data
 
 [Install]
 WantedBy=multi-user.target
@@ -185,10 +185,9 @@ def install_server(args):
     say("\n[2/5] Preparing data store")
     for sub in ("weather", "power", "fits"):
         os.makedirs(os.path.join(HERE, "data", sub), exist_ok=True)
-    os.makedirs(os.path.join(HERE, "web", "api"), exist_ok=True)
     if user:
         run(["chown", "-R", f"{user}:{user}",
-             os.path.join(HERE, "data"), os.path.join(HERE, "web", "api")], check=False)
+             os.path.join(HERE, "data")], check=False)
     say("  data/weather, data/power, data/fits ready")
 
     say("\n[3/5] Registering systemd service")

@@ -14,8 +14,6 @@ data/
 incoming_logs/
 *.csv
 
-# Dashboard JSON is derived from data/ on every server start.
-web/api/
 
 # ── Runtime state ───────────────────────────────────────────────────
 .sender_state.json

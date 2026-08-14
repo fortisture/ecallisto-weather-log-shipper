@@ -54,7 +54,12 @@ def normalize_timestamp(raw):
 
 
 def find_field(fieldnames, *candidates):
-    lowered = {name.strip().lower(): name for name in fieldnames if name}
+    # A stray BOM would otherwise make the first column "﻿timestamp"
+    # and the whole file would be skipped as "not a weather log". Files are
+    # opened as utf-8-sig so this should never trigger, but a BOM can also
+    # appear mid-file after a careless concatenation.
+    lowered = {name.strip().lstrip("﻿").lower(): name
+               for name in fieldnames if name}
     for candidate in candidates:
         if candidate in lowered:
             return lowered[candidate]
@@ -102,7 +107,7 @@ def load_all_readings(incoming_dir):
     readings = []
     for path in find_csv_files(incoming_dir):
         try:
-            with open(path, newline="", encoding="utf-8", errors="replace") as f:
+            with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
                 reader = csv.DictReader(f)
                 if not reader.fieldnames:
                     continue
@@ -204,7 +209,7 @@ def load_power_readings(power_dir):
 
     for path in find_csv_files(power_dir):
         try:
-            with open(path, newline="", encoding="utf-8", errors="replace") as f:
+            with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
                 reader = csv.DictReader(f)
                 if not reader.fieldnames:
                     continue
@@ -296,7 +301,7 @@ def generate_power(power_dir, api_dir):
 
     rail_fields = [f"{key}_{suffix}" for key, _ in SUBSYSTEMS for suffix in ("v", "ma")]
     write_range_files(readings, api_dir, POWER_RANGES, rail_fields)
-    return len(readings)
+    return sum(1 for r in readings if not r.get("gap"))
 
 
 def generate(incoming_dir, api_dir, history_hours):
@@ -333,7 +338,11 @@ def generate(incoming_dir, api_dir, history_hours):
     write_json_atomic(os.path.join(api_dir, "latest.json"), latest_out)
     write_json_atomic(os.path.join(api_dir, "history.json"), {"readings": history_readings})
     write_range_files(history_readings, api_dir, WEATHER_RANGES, fields)
-    return len(readings), len(history_readings)
+
+    # Report measurements, not the synthetic gap markers mixed in with them
+    # -- the server logs this number, and it should mean what it says.
+    measured = sum(1 for r in readings if not r.get("gap"))
+    return measured, len(history_readings)
 
 
 # --------------------------------------------------------------------
@@ -442,14 +451,31 @@ def write_range_files(readings, api_dir, ranges, value_keys):
 
 
 def hash_dir(incoming_dir):
+    """Fingerprint a store cheaply, for change detection.
+
+    Deliberately hashes each file's *identity* -- path, size, modification
+    time -- rather than its contents. The earlier version read every byte
+    of every file, which is fine for a demo archive and untenable for a
+    real one: at minute-resolution logging, five years of power telemetry
+    is ~167 MB, and re-reading that every two seconds took longer than the
+    poll interval itself. The watcher would have spent its life reading the
+    disk and still fallen behind.
+
+    Metadata is enough here. An append makes the file bigger; an in-place
+    edit changes the modification time. The only case it could miss is a
+    same-size edit within a single mtime tick, and the six-hourly failsafe
+    rebuild exists precisely to sweep up anything change detection did not
+    notice.
+    """
     h = hashlib.sha256()
     for path in find_csv_files(incoming_dir):
         try:
-            with open(path, "rb") as f:
-                h.update(path.encode("utf-8", "replace"))
-                h.update(f.read())
+            stat = os.stat(path)
         except OSError:
             continue
+        h.update(path.encode("utf-8", "replace"))
+        h.update(str(stat.st_size).encode())
+        h.update(str(stat.st_mtime_ns).encode())
     return h.hexdigest()
 
 
@@ -461,7 +487,8 @@ def main():
     )
     ap.add_argument(
         "--api-dir",
-        default=os.path.join(os.path.dirname(__file__), "web", "api", "weather"),
+        default=os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                             "data", "api", "weather"),
     )
     ap.add_argument(
         "--history-hours",

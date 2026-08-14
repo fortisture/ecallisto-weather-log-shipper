@@ -5,6 +5,55 @@ Versioning follows [SemVer](https://semver.org/): patch for fixes, minor for
 backward-compatible additions, major for breaking changes to the wire
 protocol or CLI args.
 
+## [4.6.0] - 2026-08-14
+
+Review and stress-test pass over the whole codebase. `tools/stress_test.py`
+is new and runs 49 adversarial checks — malformed CSV, hostile filenames,
+gap detection, downsampling, the solar algorithm, liveness classification
+and end-to-end generation. All pass.
+
+### Fixed
+- **A UTF-8 BOM made an entire day's data vanish.** Excel writes a BOM when
+  saving as "CSV UTF-8", which turned the first column name into
+  `\ufefftimestamp`. The file then failed the "is this a weather log?"
+  check and was skipped in silence — no error, no warning, the day simply
+  absent from the site. Files are now read as `utf-8-sig`, and `find_field`
+  strips a stray BOM as well.
+- **The systemd unit granted ReadWritePaths to a directory that no longer
+  exists** (`web/api`). Under `ProtectSystem=strict` a missing entry there
+  makes systemd refuse to start the service, so a fresh deploy would have
+  failed.
+- The server pointed at `deploy/install_receiver.ps1` in an error message.
+  That file was from the Windows-server era and has been removed;
+  `install.py` replaces it.
+- Reading counts reported in the log included synthetic gap markers, so
+  "840 readings" could mean 839 measurements and one marker.
+
+### Changed
+- **Change detection no longer reads every byte of every file.** It hashed
+  the full contents of the store on every poll: fine for a demo archive,
+  untenable for a real one. At minute-resolution logging, five years of
+  power telemetry is ~167 MB, and re-hashing it every two seconds took
+  ~14 s — longer than the poll interval, so the watcher could never keep
+  up. It now fingerprints path, size and modification time, which is
+  proportional to the number of files rather than their size. All five
+  change cases (append, in-place edit, new file, deleted file, no change)
+  verified.
+- Poll interval 2 s → 5 s. Weather arrives every few minutes and
+  spectrograms every fifteen, so polling faster only cost CPU.
+- **Generated JSON moved out of the source tree**: `web/api/` → `data/api/`,
+  served through a URL mapping exactly as `data/fits/` already was. `web/`
+  now contains only files a person wrote, and `.gitignore` no longer needs
+  a rule carving generated output out of a source directory.
+- `station/` is an explicit package with an `__init__.py`.
+
+### Known and deliberately not changed
+- `weather.html` and `power.html` still carry their own copies of helpers
+  that also exist in `common.js`. They are functionally identical, so this
+  is duplication rather than a defect — but a fix applied to one would not
+  reach the other. Recorded here rather than refactored in the same pass as
+  a set of behaviour fixes.
+
 ## [4.5.0] - 2026-08-14
 
 ### Fixed

@@ -45,6 +45,11 @@ DEFAULT_WEATHER_DIR = os.path.join(ROOT, "data", "weather")
 DEFAULT_FITS_DIR = os.path.join(ROOT, "data", "fits")
 DEFAULT_POWER_DIR = os.path.join(ROOT, "data", "power")
 
+# Generated JSON. It lives with the other data rather than inside web/, so
+# the web directory holds only files a person actually wrote, and the URL
+# /api/... is mapped onto it the same way /fits/... is.
+DEFAULT_API_DIR = os.path.join(ROOT, "data", "api")
+
 FITS_NAME = re.compile(r"^[A-Za-z0-9-]+_(\d{8})_(\d{6})_\d{2}\.fit\.gz$")
 
 
@@ -150,20 +155,33 @@ def build_fits_index(fits_dir, api_dir):
 class StationHandler(SimpleHTTPRequestHandler):
     """Serves the web UI, and maps /fits/... onto the local FITS store."""
 
-    def __init__(self, *args, fits_dir=None, **kwargs):
+    def __init__(self, *args, fits_dir=None, api_dir=None, **kwargs):
         self.fits_dir = fits_dir
+        self.api_dir = api_dir
         super().__init__(*args, directory=WEB_DIR, **kwargs)
+
+    # URL prefixes served from outside the web directory. Both hold
+    # generated or received data, which has no business sitting in the
+    # source tree.
+    def _mapped_root(self, clean):
+        if clean.startswith("/fits/"):
+            return self.fits_dir, clean[len("/fits/"):]
+        if clean.startswith("/api/"):
+            return self.api_dir, clean[len("/api/"):]
+        return None, None
 
     def translate_path(self, path):
         clean = path.split("?", 1)[0].split("#", 1)[0]
-        if clean.startswith("/fits/"):
-            relative = clean[len("/fits/"):]
-            # Reject anything that could climb out of the store.
-            safe = os.path.normpath(relative).replace("\\", "/")
-            if safe.startswith("..") or os.path.isabs(safe):
-                return os.path.join(self.fits_dir, "__denied__")
-            return os.path.join(self.fits_dir, *safe.split("/"))
-        return super().translate_path(path)
+        root, relative = self._mapped_root(clean)
+
+        if root is None:
+            return super().translate_path(path)
+
+        # Reject anything that could climb out of the store.
+        safe = os.path.normpath(relative).replace("\\", "/")
+        if safe.startswith("..") or os.path.isabs(safe):
+            return os.path.join(root, "__denied__")
+        return os.path.join(root, *safe.split("/"))
 
     def end_headers(self):
         # The dashboard polls these; stale copies would mask fresh data.
@@ -204,8 +222,8 @@ class StationHandler(SimpleHTTPRequestHandler):
         pass  # too chatty; the watcher already reports what matters
 
 
-def serve_http(host, port, fits_dir):
-    handler = partial(StationHandler, fits_dir=fits_dir)
+def serve_http(host, port, fits_dir, api_dir):
+    handler = partial(StationHandler, fits_dir=fits_dir, api_dir=api_dir)
     httpd = ThreadingHTTPServer((host, port), handler)
     log(f"web UI on http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}/")
     httpd.serve_forever()
@@ -348,8 +366,21 @@ def main():
     ap.add_argument("--weather-dir", default=DEFAULT_WEATHER_DIR)
     ap.add_argument("--fits-dir", default=DEFAULT_FITS_DIR)
     ap.add_argument("--power-dir", default=DEFAULT_POWER_DIR)
-    ap.add_argument("--api-dir", default=os.path.join(WEB_DIR, "api"))
-    ap.add_argument("--poll-interval", type=float, default=2.0)
+    ap.add_argument(
+        "--api-dir",
+        default=DEFAULT_API_DIR,
+        help="where generated JSON is written. Served at /api/, so it does "
+             "not need to sit inside the web directory.",
+    )
+    ap.add_argument(
+        "--poll-interval",
+        type=float,
+        default=5.0,
+        help="seconds between change checks. Weather arrives every few "
+             "minutes and spectrograms every fifteen, so polling faster "
+             "than this only costs CPU -- the scan is proportional to the "
+             "number of files in the store, which grows forever.",
+    )
     ap.add_argument(
         "--failsafe-hours",
         type=float,
@@ -374,16 +405,18 @@ def main():
     os.makedirs(weather_dir, exist_ok=True)
     os.makedirs(power_dir, exist_ok=True)
     os.makedirs(fits_dir, exist_ok=True)
+    os.makedirs(api_dir, exist_ok=True)
 
     log(f"weather store: {weather_dir}")
     log(f"power store:   {power_dir}")
     log(f"FITS store:    {fits_dir}")
+    log(f"generated API: {api_dir}")
 
     if not args.no_receiver:
         missing = [p for p in (args.cert, args.key, args.token_file) if not os.path.exists(p)]
         if missing:
             log("receiver disabled -- missing " + ", ".join(os.path.basename(m) for m in missing))
-            log("run deploy/install_receiver.ps1 (or make_secrets) to create them, "
+            log("run  python install.py secrets  to create them, "
                 "or pass --no-receiver")
         else:
             thread = threading.Thread(
@@ -405,7 +438,7 @@ def main():
         log(f"failsafe sweep every {args.failsafe_hours:g}h")
 
     try:
-        serve_http(args.http_host, args.http_port, fits_dir)
+        serve_http(args.http_host, args.http_port, fits_dir, api_dir)
     except KeyboardInterrupt:
         log("shutting down")
 
